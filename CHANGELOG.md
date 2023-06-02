@@ -1,45 +1,45 @@
-# [13.3.0](https://github.com/Torwent/WaspLib/compare/v13.2.20...v13.3.0) (2023-05-04)
-
-
-### Features
-
-* read notes ([b7b2e28](https://github.com/Torwent/WaspLib/commit/b7b2e28d908f1841113464b081564b6da28fd7c7))
-
-
-
-## [13.2.20](https://github.com/Torwent/WaspLib/compare/v13.2.19...v13.2.20) (2023-04-23)
+## [13.3.14](https://github.com/Torwent/WaspLib/compare/v13.3.13...v13.3.14) (2023-05-28)
 
 
 ### Bug Fixes
 
-* **forms:** fixed a tiny bug with checkboxes ([dcbc6f6](https://github.com/Torwent/WaspLib/commit/dcbc6f6633bab35917ca8db43df87d70f654cc2e))
+* Added Redwood region ([#61](https://github.com/Torwent/WaspLib/issues/61)) ([f2a1cd8](https://github.com/Torwent/WaspLib/commit/f2a1cd80827272301fb9de82dfe5681f1cf3c89c))
 
 
 
-## [13.2.19](https://github.com/Torwent/WaspLib/compare/v13.2.18...v13.2.19) (2023-04-19)
-
-
-### Bug Fixes
-
-* **rsmonsters:** hill giants now have coordinates in edge/varrock dungeon ([57c1a95](https://github.com/Torwent/WaspLib/commit/57c1a95e57aba57bae099ec2b0ab0c6753e23af5))
-
-
-
-## [13.2.18](https://github.com/Torwent/WaspLib/compare/v13.2.17...v13.2.18) (2023-04-18)
+## [13.3.13](https://github.com/Torwent/WaspLib/compare/v13.3.12...v13.3.13) (2023-05-25)
 
 
 ### Bug Fixes
 
-* readded TRSItem.IsNull() ([9b8b402](https://github.com/Torwent/WaspLib/commit/9b8b402b9fbe0e8de2cce0ac38d94d8dfc24ec11))
+* **webgraph:** added more paths to several niche locations ([ddf908d](https://github.com/Torwent/WaspLib/commit/ddf908d72e8b114fd370efb91326e84d56dd8fb7))
 
 
 
-## [13.2.17](https://github.com/Torwent/WaspLib/compare/v13.2.16...v13.2.17) (2023-04-15)
+## [13.3.12](https://github.com/Torwent/WaspLib/compare/v13.3.11...v13.3.12) (2023-05-24)
 
 
 ### Bug Fixes
 
-* several GUI improvements ([d9bf702](https://github.com/Torwent/WaspLib/commit/d9bf70240877f1356bce5ed5032d4f124dd4c87b))
+* **inventory:** read notes ([4ea8652](https://github.com/Torwent/WaspLib/commit/4ea86521074802a29af33314167aee9fdb584fbc))
+
+
+
+## [13.3.11](https://github.com/Torwent/WaspLib/compare/v13.3.10...v13.3.11) (2023-05-24)
+
+
+### Bug Fixes
+
+* read notes ([5fafd86](https://github.com/Torwent/WaspLib/commit/5fafd86680bfe8240fe7109a1044622294e75184))
+
+
+
+## [13.3.10](https://github.com/Torwent/WaspLib/compare/v13.3.9...v13.3.10) (2023-05-24)
+
+
+### Bug Fixes
+
+* **combathandler:** should now stop trying to alch the weapon and shield ([07d9b3f](https://github.com/Torwent/WaspLib/commit/07d9b3fd5739dae06f68ab9b5906ac7fe30ac7cb))
 
 
 
