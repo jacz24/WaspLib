@@ -15,7 +15,9 @@ const
   WL_WALKER_DIR = {$MACRO CURRENT_DIRECTORY};
   WL_WALKER_MAP = {$MACRO CURRENT_DIRECTORY} + 'map.png';
   WL_WALKER_MAPS = {$MACRO CURRENT_DIRECTORY} + 'maps' + DirectorySeparator;
-  WL_WALKER_MAP_VERSION = '9'; //Increment when maps are updated to force recaching.
+
+var
+  ScriptWalker: PRSWalker;
 
 (*
 type RSHeightMap
@@ -83,27 +85,28 @@ Overrides SRL's TRSWalkerMap.InternalCacheMap() so maps cached files can be vers
 Otherwise if you update your map the cache won't change and users will keep using the old image until they delete it.
 This is an internal TRSWalkerMap method and you should probably not use it directly.
 *)
-function TRSWalkerMap.InternalCacheMap(FileName: String): String; static; override;
+function TRSWalkerMap.InternalCacheMap(fileName: String): String; static; override;
 var
-  Bitmap: TMufasaBitmap;
+  bitmap: TMufasaBitmap;
+  path: String;
 begin
-  if ExtractFileExt(FileName) <> '.bmp' then
+  if ExtractFileExt(fileName) = '.bmp' then
+    Exit(fileName);
+
+  path := DATAPATH + 'RSWalker' + DirectorySeparator + SHA1File(WL_WALKER_MAP);
+  Result := path + DirectorySeparator + ExtractFileName(fileName.FileName()) + '.bmp';
+
+  if not FileExists(Result) then
   begin
-    Result := DATAPATH + 'RSWalker' + DirectorySeparator + WL_WALKER_MAP_VERSION + DirectorySeparator + 'map_' + SHA1File(FileName) + '.bmp';
-    if not FileExists(Result) then
-    begin
-      if not ForceDirectories(DataPath + 'RSWalker' + DirectorySeparator + WL_WALKER_MAP_VERSION) then
-        TerminateScript('Failed to create TRSWalker cache directories.');
+    if not ForceDirectories(path) then
+      TerminateScript('Failed to create TRSWalker cache directories.');
+    WriteLn('Caching ' + ExtractFileName(fileName) + ' this can take ~10 seconds.');
 
-      WriteLn('Caching ' + ExtractFileName(FileName) + ' this can take ~10 seconds.');
-
-      Bitmap.Init();
-      Bitmap.LoadFromFile(FileName);
-      Bitmap.SaveToFile(Result);
-      Bitmap.Free();
-    end;
-  end else
-    Result := FileName;
+    bitmap.Init();
+    bitmap.LoadFromFile(fileName);
+    bitmap.SaveToFile(Result);
+    bitmap.Free();
+  end;
 end;
 
 (*
@@ -115,40 +118,39 @@ Overrides SRL's TRSWalkerMap.InternalLoadMap() so maps cached files can be versi
 Otherwise if you update your map the cache won't change and users will keep using the old image until they delete it.
 This is an internal TRSWalkerMap method and you should probably not use it directly.
 *)
-function TRSWalkerMap.InternalLoadMap(fileName: String; Region: TBox = []): TMufasaBitmap; static; override;
+function TRSWalkerMap.InternalLoadMap(fileName: String; region: TBox = []): TMufasaBitmap; static; override;
 var
-  cacheFileName: String;
+  path, cacheName: String;
 begin
   if ExtractFileExt(fileName) <> '.bmp' then
   begin
-    cacheFileName := DataPath + 'RSWalker' + DirectorySeparator + WL_WALKER_MAP_VERSION + DirectorySeparator + 'map_' + SHA1String(FileName) + '.bmp';
-    if not FileExists(cacheFileName) then
+    path := DATAPATH + 'RSWalker' + DirectorySeparator + SHA1File(WL_WALKER_MAP);
+    cacheName := path + DirectorySeparator + ExtractFileName(fileName.FileName()) + '.bmp';
+    if not FileExists(cacheName) then
     begin
-      if not ForceDirectories(DataPath + 'RSWalker' + DirectorySeparator + WL_WALKER_MAP_VERSION) then
+      if not ForceDirectories(path) then
         TerminateScript('Failed to create TRSWalker cache directories.');
 
       WriteLn('Caching ' + ExtractFileName(fileName) + ' this can take ~10 seconds.');
 
       Result.Init();
       Result.LoadFromFile(TRSWalkerMap.FindMap(fileName));
-      Result.SaveToFile(cacheFileName);
-      if (Region <> []) then
-        Result.Crop(Region.X1, Region.Y1, Region.X2, Region.Y2);
+      Result.SaveToFile(cacheName);
+
+      if (region <> []) then
+        Result.Crop(region.X1, region.Y1, region.X2, region.Y2);
 
       Exit;
     end;
 
-    fileName := cacheFileName;
+    fileName := cacheName;
   end;
 
   Result.Init();
+  Result.LoadFromFile(fileName);
 
-  if (Region <> []) then
-  begin
-    Result.LoadFromFile(fileName);
-    Result.Crop(Region.X1, Region.Y1, Region.X2, Region.Y2);
-  end else
-    Result.LoadFromFile(fileName);
+  if (region <> []) then
+    Result.Crop(region.X1, region.Y1, region.X2, region.Y2);
 end;
 
 (*
@@ -291,6 +293,81 @@ begin
       hBitmaps[I].Free();
 end;
 
+procedure TRSWalkerMap.Load(fileName: String; ARegion: TBox; Scaling: Integer; Padding: Integer = 50); overload;
+var
+  bitmaps, hBitmaps: TMufasaBitmapArray;
+  bitmap, hBitmap: TMufasaBitmap;
+  i, hi: Int32;
+  hFileName: String;
+begin
+  for i := 0 to High(Self.Regions) do
+  begin
+    bitmaps += Self.Map.Copy(Self.Regions[i].X1, Self.Regions[i].Y1, Self.Regions[i].X2, Self.Regions[i].Y2);
+    if not RSHeightMap.Disabled then
+      hBitmaps += RSHeightMap.Map.Copy(Self.Regions[i].X1, Self.Regions[i].Y1, Self.Regions[i].X2, Self.Regions[i].Y2);
+  end;
+
+  Self.Map.Clear();
+  if not RSHeightMap.Disabled then
+    RSHeightmap.Map.Clear();
+
+  fileName := fileName.Replace(SRL_WALKER_DIR, WL_WALKER_DIR);
+
+  hFileName := ExtractFilePath(fileName) + 'h' + ExtractFileName(fileName);
+  RSHeightMap.Disabled := RSHeightMap.Disabled or
+                         (RSHeightMap.MaxHeight = 0) or not FileExists(hFileName);
+
+  SetLength(Self.Regions, Length(Self.Regions) + 1);
+  SetLength(Self.RegionOffsets, Length(Self.Regions));
+
+  hi := High(Self.Regions);
+
+  Self.RegionOffsets[hi] := TPoint.Create(ARegion.X1, ARegion.Y1);
+
+  bitmap := Self.InternalLoadMap(fileName, ARegion);
+  if not RSHeightMap.Disabled then
+    hBitmap := Self.InternalLoadMap(hFileName, ARegion);
+
+  if (ARegion <> RSWalkerRegions.WORLD) then
+  begin
+    Self.RegionOffsets[hi].X -= Padding;
+    Self.RegionOffsets[hi].Y -= Padding;
+
+    bitmap.Pad(Padding);
+    if not RSHeightMap.Disabled then
+      hBitmap.Pad(Padding);
+  end;
+
+  Self.Regions[hi] := TBox.Create(0, 0, bitmap.GetWidth(), bitmap.GetHeight());
+  bitmaps += bitmap;
+  if not RSHeightMap.Disabled then
+    hBitmaps += hBitmap;
+
+  Self.Regions := Self.Regions.Pack();
+  Self.Map.SetSize(Self.Regions.Merge.Width(), Self.Regions.Merge.Height());
+
+  if not RSHeightMap.Disabled then
+    RSHeightMap.Map.SetSize(Self.Regions.Merge.Width(), Self.Regions.Merge.Height());
+
+  for I := 0 to High(Self.Regions) do
+  begin
+    Self.Map.DrawBitmap(bitmaps[I], TPoint.Create(Self.Regions[I].X1, Self.Regions[I].Y1));
+    if not RSHeightMap.Disabled then
+      RSHeightMap.Map.DrawBitmap(hBitmaps[I], TPoint.Create(Self.Regions[I].X1, Self.Regions[I].Y1));
+  end;
+
+  Self.ScaledMap.Clear();
+  Self.Map.Downsample(Scaling, Self.ScaledMap);
+
+  for I := 0 to High(bitmaps) do
+    bitmaps[I].Free();
+
+  if not RSHeightMap.Disabled then
+    for I := 0 to High(hBitmaps) do
+      hBitmaps[I].Free();
+end;
+
+
 (*
 Walker.InternalSetup
 ~~~~~~~~~~~~~~~~~~~~
@@ -298,22 +375,25 @@ Walker.InternalSetup
 
 Overrides SRL's Walker.InternalSetup() so it uses WaspWeb as the walker webgraph and so it uses ScreenWalk by default.
 This is an internal Walker method, you probably don't need to call it.
+It also sets up the ScriptWalker pointer which is used for several things in WaspLib like TRSWalkerObjects and Skunk's transport system.
 *)
 procedure TRSWalker.InternalSetup(); override;
 var
-  MinimapImage, MinimapSample: TMufasaBitmap;
+  minimapImage, minimapSample: TMufasaBitmap;
 begin
   Self.Name := 'Walker';
 
-  MinimapImage := Self.GetCleanMinimap();
-  MinimapSample := Self.ScaleMinimap(MinimapImage, Self.Scaling);
+  minimapImage := Self.GetCleanMinimap();
+  minimapSample := Self.ScaleMinimap(minimapImage, Self.Scaling);
 
   Self.Cache := TMatchTemplateRGBCache.Create(Self.Map.ScaledMap.ToMatrix(), MinimapSample.ToMatrix());
   Self.WebGraph := WaspWeb;
   Self.ScreenWalk := True;
 
-  MinimapSample.Free();
-  MinimapImage.Free();
+  minimapSample.Free();
+  minimapImage.Free();
+
+  ScriptWalker := @Self;
 end;
 
 (*
@@ -340,6 +420,44 @@ begin
     region := RSBankRegions[WLSettings.BankLocation];
 
   Self.Setup([region.Bounds]);
+end;
+
+(*
+Walker.SetupFromURL
+~~~~~~~~~~~~~~~~~~~
+.. pascal:: procedure TRSWalker.SetupFromURL(url: String; map: String = ''; scaling: Int32 = 8; forceDownload: Boolean = False); overload;
+
+Allows you to setup a TRSWalker with a map from the internet.
+You can optionally skip downloading the file if it already exists by using **forceDownload**.
+If **map** is empty, the url file name will be used.
+*)
+procedure TRSWalker.SetupFromURL(url: String; map: String = ''; scaling: Int32 = 8; forceDownload: Boolean = False); overload;
+var
+  tmp: TStringArray;
+begin
+  if map = '' then
+  begin
+    tmp := url.Explode('/');
+    map := tmp[High(tmp)];
+  end;
+
+  DownloadToFile(url, WL_WALKER_MAPS + map, forceDownload);
+  Self.Setup(map, scaling);
+end;
+
+
+
+(*
+Walker.AddRegion
+~~~~~~~~~~~~~~~~
+.. pascal:: procedure TRSWalker.AddRegion(region: TBox); overload;
+
+Add a region to walker on the fly after it is already setup.
+*)
+procedure TRSWalker.AddRegion(region: TBox); overload;
+begin
+  Self.Map.Load(SRL_WALKER_MAP, region, Self.Scaling);
+  Self.InternalSetup();
 end;
 
 (*
@@ -663,7 +781,7 @@ This is a TRSWalker method so it will exist both on TRSWalker and TRSWalker.
 function TRSWalker.GetClosestPoint(destinations: TPointArray): TPoint;
 var
   paths, shortPaths: T2DPointArray;
-  path, shortPath: TPointArray;
+  path: TPointArray;
   shortest: Int32;
   me, destination: TPoint;
 begin
@@ -677,32 +795,20 @@ begin
     except
     end;
 
-    if path <> [] then
+    if (path <> []) and not paths.Contains(path) then
       paths += path;
   end;
 
   if paths = [] then
     Exit(destinations.NearestPoint(me));
 
-  shortest := Length(paths.Smallest());
+  shortest := Round(paths.ShortestDistance());
 
   for path in paths do
-    if Length(path) = shortest then
+    if InRange(path.TotalDistance(), shortest-15, shortest+15) then
       shortPaths += path;
 
-  for path in shortPaths do
-  begin
-    if shortPath = [] then
-    begin
-      shortPath := path;
-      Continue;
-    end;
-
-    if me.DistanceTo(path.Last()) < me.DistanceTo(shortPath.Last()) then
-      shortPath := path;;
-  end;
-
-  Result := shortPath.Last();
+  Result := shortPaths.RandomValue().Last();
 end;
 
 (*
@@ -858,7 +964,7 @@ Example
 -------
   Debug(RSW.GetCuboidMS([100, 100], [1, 1, 4], Offset));     //This will draw a polygon around the coordinate [100, 100].
 *)
-function TRSWalker.GetCuboidMS(me, loc: TPoint; shape: TRSMainScreenShape; offset: Vector2 = [0, 0]): TCuboid;
+function TRSWalker.GetCuboidMS(me, loc: TPoint; shape: TRSMainScreenShape; offset: Vector2 = [0, 0]): TCuboidEx;
 var
   angle: Double;
 begin
@@ -869,12 +975,12 @@ begin
   Result := Minimap.GetCuboidMS(loc, shape, offset, angle);
 end;
 
-function TRSWalker.GetCuboidMS(loc: TPoint; shape: TRSMainScreenShape; offset: Vector2 = [0, 0]): TCuboid; overload;
+function TRSWalker.GetCuboidMS(loc: TPoint; shape: TRSMainScreenShape; offset: Vector2 = [0, 0]): TCuboidEx; overload;
 begin
   Result := Self.GetCuboidMS(Self.GetMyPos(), loc, shape, offset);
 end;
 
-function TRSWalker.GetCuboidMS(me, loc: TPoint; tile: Vector3 = [1, 1, 4]; offset: Vector2 = [0, 0]): TCuboid; overload;
+function TRSWalker.GetCuboidMS(me, loc: TPoint; tile: Vector3 = [1, 1, 4]; offset: Vector2 = [0, 0]): TCuboidEx; overload;
 var
   Angle: Double;
 begin
@@ -884,7 +990,7 @@ begin
   Result := Minimap.GetCuboidMS(loc, tile, Offset, Angle);
 end;
 
-function TRSWalker.GetCuboidMS(loc: TPoint; tile: Vector3 = [1, 1, 4]; offset: Vector2 = [0, 0]): TCuboid; overload;
+function TRSWalker.GetCuboidMS(loc: TPoint; tile: Vector3 = [1, 1, 4]; offset: Vector2 = [0, 0]): TCuboidEx; overload;
 begin
   Result := Self.GetCuboidMS(Self.GetMyPos(), loc, tile, Offset);
 end;
@@ -990,7 +1096,7 @@ Example
   TPA := Minimap.GetDots(ERSMinimapDot.Player);   //find all player dots and returns their coodinates.
   Debug(Minimap.GetCuboidArrayMS(TPA, [2, 3, 5], [2, 2])); //This will draw a polygon that is 2 by 3 tiles and height 5 in the mainscreen where each NPC is.
 *)
-function TRSWalker.GetCuboidArrayMS(me: TPoint; locArray: TPointArray; shapeArray: TRSMainScreenShapeArray; Offset: Vector2 = [0, 0]): TCuboidArray;
+function TRSWalker.GetCuboidArrayMS(me: TPoint; locArray: TPointArray; shapeArray: TRSMainScreenShapeArray; Offset: Vector2 = [0, 0]): TCuboidExArray;
 var
   angle, meHeight: Double;
   i: Int32;
@@ -1008,7 +1114,7 @@ begin
   for i := 0 to High(tmpArray) do
   begin
     if not RSHeightMap.Disabled then
-      heightArray[i] := meHeight - Self.GetHeight(locArray[i])
+      heightArray[i] -= meHeight - Self.GetHeight(locArray[i])
     else
       heightArray[i] := 0;
     tmpArray[i] := Self.WorldToMM(me, locArray[i], angle);
@@ -1017,7 +1123,7 @@ begin
   Result := Minimap.GetCuboidArrayMSEx(tmpArray, shapeArray, heightArray, offset, angle);
 end;
 
-function TRSWalker.GetCuboidArrayMS(me: TPoint; locArray: TPointArray; shape: TRSMainScreenShape; offset: Vector2 = [0, 0]): TCuboidArray; overload;
+function TRSWalker.GetCuboidArrayMS(me: TPoint; locArray: TPointArray; shape: TRSMainScreenShape; offset: Vector2 = [0, 0]): TCuboidExArray; overload;
 var
   angle, meHeight: Double;
   i: Int32;
@@ -1044,7 +1150,7 @@ begin
   Result := Minimap.GetCuboidArrayMSEx(tmpArray, shapeArray, heightArray, offset, angle);
 end;
 
-function TRSWalker.GetCuboidArrayMS(me: TPoint; locArray: TPointArray; tile: Vector3 = [1, 1, 4]; Offset: Vector2 = [0, 0]): TCuboidArray; overload;
+function TRSWalker.GetCuboidArrayMS(me: TPoint; locArray: TPointArray; tile: Vector3 = [1, 1, 4]; Offset: Vector2 = [0, 0]): TCuboidExArray; overload;
 var
   shape: TRSMainScreenShape;
 begin
@@ -1052,7 +1158,7 @@ begin
   Result := Self.GetCuboidArrayMS(me, locArray, shape, offset);
 end;
 
-function TRSWalker.GetCuboidArrayMS(locArray: TPointArray; tile: Vector3 = [1, 1, 4]; Offset: Vector2 = [0, 0]): TCuboidArray; overload;
+function TRSWalker.GetCuboidArrayMS(locArray: TPointArray; tile: Vector3 = [1, 1, 4]; Offset: Vector2 = [0, 0]): TCuboidExArray; overload;
 begin
   Result := Self.GetCuboidArrayMS(Self.GetMyPos(), locArray, tile, Offset);
 end;
@@ -1109,5 +1215,8 @@ end;
 
 
 begin
-  RSHeightMap.MaxHeight := 70;
+  if RSClient.Mode = ERSClientMode.FIXED then
+    RSHeightMap.MaxHeight := 70
+  else
+    RSHeightMap.MaxHeight := 60;
 end;

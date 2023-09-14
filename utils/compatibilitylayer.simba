@@ -75,52 +75,13 @@ begin
   Result := Lowercase(Self);
 end;
 
-function String.Contains(SubString: String): Boolean;
-begin
-  Result := Self.Pos(SubString) > 0;
-end;
-
-function String.ContainsAny(SubStrings: TStringArray): Boolean; overload;
-var
-  Str: String;
-begin
-  Result := False;
-  for Str in SubStrings do
-    if Self.Contains(Str) then
-      Exit(True);
-end;
-
-function String.ContainsAll(SubStrings: TStringArray): Boolean; overload;
-var
-  Str: String;
-begin
-  Result := True;
-  for Str in SubStrings do
-    if not Self.Contains(Str) then
-      Exit(False);
-end;
-
-
-
-
 
 //similar to TIntegerArray.ClearDuplicates()
 function TIntegerArray.Unique(): TIntegerArray;
 begin
-  ClearSameIntegers(Self);
   Result := Self;
+  ClearSameIntegers(Result);
 end;
-
-//new simba1500 function for all arrays.
-function TIntegerArray.Intersection(other: TIntegerArray): TIntegerArray; constref;
-var
-  i: Int32;
-begin
-  for i := 0 to High(other) do
-    if Self.Find(other[i]) > -1 then
-      Result += other[i];
-end;
-
 
 //new simba1500 function for all arrays.
 function TPointArray.Contains(const Value: TPoint): Boolean;
@@ -190,6 +151,11 @@ begin
   Result := Point((Self.X2 + Self.X1+1) div 2, (Self.Y2 + Self.Y1+1) div 2);
 end;
 
+
+function T2DPointArray.Contains(const value: TPointArray): Boolean;
+begin
+  Result := Self.Find(value) > -1;
+end;
 
 function T2DPointArray.ExcludeSize(MinLen:Int32; KeepIf:EComparator=__LT__): T2DPointArray; constref;
 var

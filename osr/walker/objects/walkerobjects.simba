@@ -92,12 +92,21 @@ Parent record of all TRSWalkerObjects.
   class var
     CurrentUpText: TStringArray;
     RedClicked: Boolean;
-    Walker: PRSWalker;
     Regions: TBoxArray;
   end;
 
   PRSWalkerObjectArray = array of ^TRSWalkerObject;
 
+(*
+Walker.Click
+~~~~~~~~~~~~
+.. pascal:: function TRSWalker.Click(MinimapPoint: TPoint; Randomness: Int32): Boolean; override;
+
+You shouldn't modify this unless you know what you are doing, otherwise you might break TRSWalkerObjects.
+This is overriden so if we redclick our current TRSWalkerObject target while mainscreen walking we disable walker.
+When we start the walking process towards a TRSWalkerObject, TRSWalkerObject.CurrentUpText is temporarily set so we
+know what we are looking for while walking. Once we click the target TRSWalkerObject.CurrentUpText is cleared.
+*)
 
 (*
 Walker.InternalSetup
@@ -112,7 +121,6 @@ procedure TRSWalker.InternalSetup(); override;
 begin
   inherited;
 
-  TRSWalkerObject.Walker := @Self;
   TRSWalkerObject.Regions := [[0, 0, Self.Map.Map.getWidth()-1, Self.Map.Map.getHeight()-1]];
 end;
 
@@ -131,16 +139,12 @@ begin
   TRSWalkerObject.Regions := Regions;
 end;
 
-(*
-Walker.Click
-~~~~~~~~~~~~
-.. pascal:: function TRSWalker.Click(MinimapPoint: TPoint; Randomness: Int32): Boolean; override;
+procedure TRSWalker.AddRegion(region: TBox); override;
+begin
+  inherited;
+  TRSWalkerObject.Regions += region;
+end;
 
-You shouldn't modify this unless you know what you are doing, otherwise you might break TRSWalkerObjects.
-This is overriden so if we redclick our current TRSWalkerObject target while mainscreen walking we disable walker.
-When we start the walking process towards a TRSWalkerObject, TRSWalkerObject.CurrentUpText is temporarily set so we
-know what we are looking for while walking. Once we click the target TRSWalkerObject.CurrentUpText is cleared.
-*)
 function TRSWalker.Click(MinimapPoint: TPoint; Randomness: Int32): Boolean; override;
 var
   p: TPoint;
@@ -268,7 +272,8 @@ Example
 *)
 procedure TRSWalkerObject.Setup(coordinates: TPointArray);
 begin
-  Self.Filter.Skip := TRSWalkerObject.Walker = nil;
+  Self.Filter.Skip := ScriptWalker = nil;
+
   if Self.Filter.Skip then
     Exit;
 
@@ -308,16 +313,16 @@ Internal TRSWalkerObject method responsible for returning a TCuboidArray of our 
 You will probably never need to use this directly.
 You can visually see this in action by using the `Debug()` methods, this is responsible for the white lines surounding the targets.
 *)
-function TRSWalkerObject.GetCuboidArrayEx(out floorTiles, roofTiles: TRectArray): TCuboidArray;
+function TRSWalkerObject.GetCuboidArrayEx(out floorTiles, roofTiles: TRectArray): TCuboidExArray;
 var
   me: TPoint;
 begin
-  me := TRSWalkerObject.Walker^.GetMyPos();
+  me := ScriptWalker^.GetMyPos();
 
-  floorTiles := TRSWalkerObject.Walker^.GetTileArrayMS(me, Self.Coordinates, Self.ShapeArray.GetShape(0));
+  floorTiles := ScriptWalker^.GetTileArrayMS(me, Self.Coordinates, Self.ShapeArray.GetShape(0));
   if not Self.ShapeArray.ZeroHeight() then
   begin
-    roofTiles := TRSWalkerObject.Walker^.GetTileArrayMS(me, Self.Coordinates, Self.ShapeArray);
+    roofTiles := ScriptWalker^.GetTileArrayMS(me, Self.Coordinates, Self.ShapeArray);
     Exit(floorTiles.GetCuboids(roofTiles));
   end;
 
@@ -325,14 +330,18 @@ begin
   Result := floorTiles.GetCuboids();
 end;
 
-function TRSWalkerObject.GetCuboidArray(): TCuboidArray;
+function TRSWalkerObject.GetCuboidArray(): TCuboidExArray;
 var
   me: TPoint;
   coordinates: TPointArray;
 begin
-  me := TRSWalkerObject.Walker^.GetMyPos();
+  me := ScriptWalker^.GetMyPos();
+
   coordinates := Self.Coordinates.Sorted(me);
-  Result := TRSWalkerObject.Walker^.GetCuboidArrayMS(me, coordinates, Self.ShapeArray, [0, 0]);
+  coordinates := coordinates.PointsInRangeOf([me],0, 120);
+                                                            //This is extremely wrong but will stay for now.
+                                                            //shapearray should also be sorted and cropped.
+  Result := ScriptWalker^.GetCuboidArrayMS(me, coordinates, Self.ShapeArray, [0, 0]);
 end;
 
 (*
@@ -344,7 +353,7 @@ Internal TRSWalkerObject method responsible for filtering a TCuboidArray by what
 This is meant to filter TRSWalkerObject.GetCuboidArray() so targets that are outside of the mainscreen are filtered out.
 You will probably never need to use this directly.
 *)
-function TRSWalkerObject.FindOnMainScreen(cuboidArray: TCuboidArray): T2DPointArray;
+function TRSWalkerObject.FindOnMainScreen(cuboidArray: TCuboidExArray): T2DPointArray;
 var
   i: Int32;
   tpa: TPointArray;
@@ -369,7 +378,7 @@ begin
       Continue;
     end;
 
-    tpa := cuboidArray[i].Connect().ShapeFill();
+    tpa := cuboidArray[i].ShapeFill();
     if tpa <> [] then
       Result += tpa;
   end;
@@ -383,7 +392,7 @@ TRSWalkerObject.OnMainScreen
 Internal TRSWalkerObject method that returns true or false if we have TCuboids visible on the mainscreen.
 You probably don't need to use this directly.
 *)
-function TRSWalkerObject.OnMainScreen(cuboidArray: TCuboidArray): Boolean;
+function TRSWalkerObject.OnMainScreen(cuboidArray: TCuboidExArray): Boolean;
 var
   i: Int32;
   tempFinder: TRSObjectFinder;
@@ -397,7 +406,7 @@ begin
     if not Self.Filter.Finder then
       Exit(True);
 
-    if MainScreen.FindObject(tempFinder, cuboidArray[i].Bounds) <> [] then
+    if MainScreen.FindObject(tempFinder, cuboidArray[i].Bounds()) <> [] then
       Exit(True);
   end;
 end;
@@ -605,10 +614,10 @@ begin
   if Self = [] then
     Exit;
 
-  if TRSWalkerObject.Walker = nil then
+  if ScriptWalker = nil then
     Exit;
 
-  me := TRSWalkerObject.Walker^.GetMyPos();
+  me := ScriptWalker^.GetMyPos();
 
   hi := High(Self);
   for i := 0 to hi do
@@ -688,7 +697,7 @@ This "extended" method in particular is only meant for debugging and should be a
 This is what is used when you call `Debug(TRSObject)`.
 
 *)
-function TRSObject.FindEx(out floorTiles, roofTiles: TRectArray; out cuboidArray: TCuboidArray; out atpa: T2DPointArray): Boolean;
+function TRSObject.FindEx(out floorTiles, roofTiles: TRectArray; out cuboidArray: TCuboidExArray; out atpa: T2DPointArray): Boolean;
 begin
   MM2MS.SetupZoom();
 
@@ -725,7 +734,7 @@ Example
 *)
 function TRSObject.Find(out atpa: T2DPointArray): Boolean; overload;
 var
-  cuboidArray: TCuboidArray;
+  cuboidArray: TCuboidExArray;
 begin
   MM2MS.SetupZoom();
 
@@ -749,7 +758,7 @@ end;
 
 function TRSObject.IsVisible(): Boolean; overload;
 var
-  cuboidArray: TCuboidArray;
+  cuboidArray: TCuboidExArray;
 begin
   MM2MS.SetupZoom();
 
@@ -786,7 +795,7 @@ Example
 procedure TRSObject.Draw(out bitmap: TMufasaBitmap);
 var
   floorTiles, roofTiles: TRectArray;
-  cuboidArray: TCuboidArray;
+  cuboidArray: TCuboidExArray;
   atpa: T2DPointArray;
   i: Int32;
 begin
@@ -800,7 +809,7 @@ begin
   begin
     bitmap.DrawRect(floorTiles[i], SRLColors.WHITE);
     bitmap.DrawRect(roofTiles[i], SRLColors.WHITE);
-    bitmap.DrawTPA(cuboidArray[i].Connect(), SRLColors.YELLOW);
+    bitmap.DrawTPA(cuboidArray[i].Edges(), SRLColors.YELLOW);
   end;
 end;
 
@@ -832,7 +841,7 @@ begin
   WriteLn('Send ', filePath, ' to Torwent on discord!');
   Bitmap.Debug();
 
-  WriteLn('Position: ', TRSWalkerObject.Walker^.GetMyPos(), ' ZoomLevel: ', MM2MS.ZoomLevel);
+  WriteLn('Position: ', ScriptWalker^.GetMyPos(), ' ZoomLevel: ', MM2MS.ZoomLevel);
   WriteLn('RSObject: ', Self);
   Bitmap.Free();
 end;
@@ -998,6 +1007,7 @@ var
   atpa: T2DPointArray;
   tpa: TPointArray;
   angle: Double;
+  closestWO: TPoint;
 begin
   if not Self.Filter.Walker then
     Exit(Self._HoverHelper(attempts));
@@ -1033,17 +1043,18 @@ begin
     if MainScreen.IsUpText(Self.UpText) then
       Exit(True);
 
-    if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 50) then
+    closestWO := ScriptWalker^.GetClosestPoint(Self.Coordinates);
+    if not ScriptWalker^.AtTile(closestWO, 50) then
     begin
-      TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 30, 0.15);
+      ScriptWalker^.WebWalk(closestWO, 30, 0.15);
       Continue;
     end;
 
     if attempt = (attempts - 1) then
     begin
-      if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 25) then
+      if not ScriptWalker^.AtTile(closestWO, 25) then
       begin
-        TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 25, 0.15);
+        ScriptWalker^.WebWalk(closestWO, 25, 0.15);
         Continue;
       end;
 
@@ -1070,6 +1081,7 @@ var
   atpa: T2DPointArray;
   tpa: TPointArray;
   angle: Double;
+  closestWO: TPoint;
 begin
   if not Self.Filter.Walker then
     Exit(Self._HoverHelper(attempts));
@@ -1097,17 +1109,18 @@ begin
     if MainScreen.IsUpText(Self.UpText) then
       Exit(True);
 
-    if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 50) then
+    closestWO := ScriptWalker^.GetClosestPoint(Self.Coordinates);
+    if not ScriptWalker^.AtTile(closestWO, 50) then
     begin
-      TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 30, 0.15);
+      ScriptWalker^.WebWalk(closestWO, 30, 0.15);
       Continue;
     end;
 
     if attempt = (attempts - 1) then
     begin
-      if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 25) then
+      if not ScriptWalker^.AtTile(closestWO, 25) then
       begin
-        TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 25, 0.15);
+        ScriptWalker^.WebWalk(closestWO, 25, 0.15);
         Continue;
       end;
 
@@ -1171,7 +1184,7 @@ begin
     ChooseOption.Close();
   end;
 
-  if Self.Filter.Walker and not TRSWalkerObject.Walker^.MakePointVisible(Self.Coordinates) then
+  if Self.Filter.Walker and not ScriptWalker^.MakePointVisible(Self.Coordinates) then
     Exit;
 
   Result := (async and Self._AsyncHoverHelper(attempts)) or Self._HoverHelper(attempts);
@@ -1206,6 +1219,8 @@ Example
   until MainScreen.IsUpText('Exch');
 *)
 function TRSObject.WalkHover(attempts: Int32 = 2; async: Boolean = USE_ASYNC_HOVER): Boolean;
+var
+  p: TPoint;
 begin
   if ChooseOption.IsOpen() then
   begin
@@ -1220,8 +1235,9 @@ begin
   if Self.Filter.UpText and (TRSWalkerObject.CurrentUpText <> Self.UpText) then
     TRSWalkerObject.CurrentUpText := Self.UpText;
 
-  if not TRSWalkerObject.Walker^.MakePointVisible(Self.Coordinates) and
-     not TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 30, 0.15) then
+  p := ScriptWalker^.GetClosestPoint(Self.Coordinates);
+  if not ScriptWalker^.MakePointVisible(p) and
+     not ScriptWalker^.WebWalk(p, 30, 0.15) then
       Exit;
 
   Result := (async and Self._AsyncWalkHoverHelper(attempts)) or Self._WalkHoverHelper(attempts);
@@ -1391,18 +1407,18 @@ TRSMMDot._GetWMMPolys
 Internal helper TRSMMDot method used for debugging.
 You probably dont need to use this directly. You can see what this does in action by calling `Debug(TRSMMDot)`.
 *)
-function TRSMMDot._GetWMMPolys(out mmTPA, dots: TPointArray; out dotFilters: TRSDotFilterArray; out floorTiles, roofTiles: TRectArray): TCuboidArray;
+function TRSMMDot._GetWMMPolys(out mmTPA, dots: TPointArray; out dotFilters: TRSDotFilterArray; out floorTiles, roofTiles: TRectArray): TCuboidExArray;
 var
   me: TPoint;
   angle: Double;
 begin
-  me := TRSWalkerObject.Walker^.GetMyPos();
+  me := ScriptWalker^.GetMyPos();
   angle := Minimap.GetCompassAngle(False);
 
-  mmTPA := TRSWalkerObject.Walker^.WorldToMM(me, Self.Coordinates, angle);
+  mmTPA := ScriptWalker^.WorldToMM(me, Self.Coordinates, angle);
 
   dotFilters.ClearExpired();
-  dotFilters := TRSWalkerObject.Walker^.WorldToMM(me, Self.DotFilter, angle);
+  dotFilters := ScriptWalker^.WorldToMM(me, Self.DotFilter, angle);
   dots := Minimap.GetFilteredDotArray(Self.DotType, dotFilters);
 
   floorTiles := Minimap.GetTileArrayMS(dots, Self.ShapeArray.GetShape(0), [-2, -2], angle);
@@ -1426,7 +1442,7 @@ Internal helper TRSMMDot method used for debugging.
 You probably dont need to use this directly. You can see what this does in action by calling `Debug(TRSMMDot)`.
 This is used instead of TRSMMDot._GetWMMPolys() when TRSMMDot.Filter.Walker is disabled.
 *)
-function TRSMMDot._GetMMPolys(out dots: TPointArray; out floorTiles, roofTiles: TRectArray): TCuboidArray;
+function TRSMMDot._GetMMPolys(out dots: TPointArray; out floorTiles, roofTiles: TRectArray): TCuboidExArray;
 var
   angle: Double;
 begin
@@ -1457,7 +1473,7 @@ This uses the previous 2 helper methods to do this.
 You will probably never need to use this directly.
 You can visually see this in action by using the `Debug()` methods, this is responsible for the white lines surounding the targets.
 *)
-function TRSMMDot.GetCuboidArrayEx(out mmTPA, dots: TPointArray; out dotFilters: TRSDotFilterArray; out floorTiles: TRectArray; out roofTiles: TRectArray): TCuboidArray; overload;
+function TRSMMDot.GetCuboidArrayEx(out mmTPA, dots: TPointArray; out dotFilters: TRSDotFilterArray; out floorTiles: TRectArray; out roofTiles: TRectArray): TCuboidExArray; overload;
 begin
   if Self.Filter.Walker and Self.Filter.MinimapDot then
     Exit(Self._GetWMMPolys(mmTPA, dots, dotFilters, floorTiles, roofTiles));
@@ -1469,7 +1485,7 @@ begin
     Exit(Self._GetMMPolys(dots, floorTiles, roofTiles));
 end;
 
-function TRSMMDot.GetCuboidArray(): TCuboidArray; override;
+function TRSMMDot.GetCuboidArray(): TCuboidExArray; override;
 var
   angle: Double;
   dots: TPointArray;
@@ -1477,7 +1493,7 @@ begin
   if Self.Filter.Walker and Self.Filter.MinimapDot then
   begin
     angle := Minimap.GetCompassAngle(False);
-    dots := Minimap.GetFilteredDotArray(Self.DotType, TRSWalkerObject.Walker^.WorldToMM(Self.DotFilter, angle));
+    dots := Minimap.GetFilteredDotArray(Self.DotType, ScriptWalker^.WorldToMM(Self.DotFilter, angle));
     if dots = [] then
       Exit;
 
@@ -1517,7 +1533,7 @@ TRSMMDot methods used to find a TRSMMDot. If found returns true, if not returns 
 This "extended" method in particular is only meant for debugging and should be avoided outside of development/debugging.
 This is what is used when you call `Debug(TRSMMDot)`.
 *)
-function TRSMMDot.FindEx(out mmPoints, dots: TPointArray; out DotFilters: TRSDotFilterArray; out floorTiles: TRectArray; out roofTiles: TRectArray; out cuboidArray: TCuboidArray; out atpa: T2DPointArray): Boolean;
+function TRSMMDot.FindEx(out mmPoints, dots: TPointArray; out DotFilters: TRSDotFilterArray; out floorTiles: TRectArray; out roofTiles: TRectArray; out cuboidArray: TCuboidExArray; out atpa: T2DPointArray): Boolean;
 begin
   MM2MS.SetupZoom();
 
@@ -1535,8 +1551,8 @@ begin
     atpa := MainScreen.FindObject(Self.Finder).SortFrom(MainScreen.GetPlayerBox().Center());
 
   if Result := (atpa <> []) then
-    if TRSWalkerObject.Walker <> nil then
-      Self.ClosestDot := TRSWalkerObject.Walker^.MSToWorld(atpa.First().Mean()); //not the best way since we are reversing operations but will do for now.
+    if ScriptWalker <> nil then
+      Self.ClosestDot := ScriptWalker^.MSToWorld(atpa.First().Mean()); //not the best way since we are reversing operations but will do for now.
 end;
 
 (*
@@ -1556,7 +1572,7 @@ Example
 *)
 function TRSMMDot.Find(out atpa: T2DPointArray): Boolean; overload;
 var
-  cuboidArray: TCuboidArray;
+  cuboidArray: TCuboidExArray;
 begin
   MM2MS.SetupZoom();
 
@@ -1576,13 +1592,13 @@ begin
   end;
 
   if Result := (atpa <> []) then
-    if TRSWalkerObject.Walker <> nil then
-      Self.ClosestDot := TRSWalkerObject.Walker^.MSToWorld(ATPA[0].Mean());
+    if ScriptWalker <> nil then
+      Self.ClosestDot := ScriptWalker^.MSToWorld(ATPA[0].Mean());
 end;
 
 function TRSMMDot.IsVisible(): Boolean; overload;
 var
-  cuboidArray: TCuboidArray;
+  cuboidArray: TCuboidExArray;
 begin
   MM2MS.SetupZoom();
 
@@ -1632,7 +1648,7 @@ var
   mmPoints, dots: TPointArray;
   dotFilters: TRSDotFilterArray;
   floorTiles, roofTiles: TRectArray;
-  cuboidArray: TCuboidArray;
+  cuboidArray: TCuboidExArray;
   atpa: T2DPointArray;
   i: Int32;
 begin
@@ -1673,7 +1689,7 @@ begin
     bitmap.DrawCrosshairs(dots[i], 2, SRLColors.GREEN_SPRING);
     bitmap.DrawRect(floorTiles[i], SRLColors.WHITE);
     bitmap.DrawRect(roofTiles[i], SRLColors.WHITE);
-    bitmap.DrawTPA(cuboidArray[i].Connect(), SRLColors.YELLOW);
+    bitmap.DrawTPA(cuboidArray[i].Edges(), SRLColors.YELLOW);
   end;
 end;
 
@@ -1705,7 +1721,7 @@ begin
   WriteLn('Send ', filePath, ' to Torwent on discord!');
   Bitmap.Debug();
 
-  WriteLn('Position: ', TRSWalkerObject.Walker^.GetMyPos(), ' ZoomLevel: ', MM2MS.ZoomLevel);
+  WriteLn('Position: ', ScriptWalker^.GetMyPos(), ' ZoomLevel: ', MM2MS.ZoomLevel);
   WriteLn('RSObject: ', Self);
   Bitmap.Free();
 end;
@@ -1891,6 +1907,7 @@ var
   atpa: T2DPointArray;
   tpa: TPointArray;
   angle: Double;
+  closestWO: TPoint;
 begin
   if not Self.Filter.Walker then
     Exit(Self._HoverHelper(attempts));
@@ -1933,17 +1950,18 @@ begin
     if MainScreen.IsUpText(Self.UpText) then
       Exit(True);
 
-    if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 50) then
+    closestWO := ScriptWalker^.GetClosestPoint(Self.Coordinates);
+    if not ScriptWalker^.AtTile(closestWO, 50) then
     begin
-      TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 30, 0.15);
+      ScriptWalker^.WebWalk(closestWO, 30, 0.15);
       Continue;
     end;
 
     if attempt = (attempts - 1) then
     begin
-      if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 25) then
+      if not ScriptWalker^.AtTile(closestWO, 25) then
       begin
-        TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 25, 0.15);
+        ScriptWalker^.WebWalk(closestWO, 25, 0.15);
         Continue;
       end;
 
@@ -1972,6 +1990,7 @@ var
   atpa: T2DPointArray;
   tpa: TPointArray;
   angle: Double;
+  closestWO: TPoint;
 begin
   if not Self.Filter.Walker then
     Exit(Self._HoverHelper(attempts));
@@ -2003,17 +2022,18 @@ begin
     if MainScreen.IsUpText(Self.UpText) then
       Exit(True);
 
-    if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 50) then
+    closestWO := ScriptWalker^.GetClosestPoint(Self.Coordinates);
+    if not ScriptWalker^.AtTile(closestWO, 50) then
     begin
-      TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 30, 0.15);
+      ScriptWalker^.WebWalk(closestWO, 30, 0.15);
       Continue;
     end;
 
     if attempt = (attempts - 1) then
     begin
-      if not TRSWalkerObject.Walker^.AtTile(Self.Coordinates, 25) then
+      if not ScriptWalker^.AtTile(closestWO, 25) then
       begin
-        TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 25, 0.15);
+        ScriptWalker^.WebWalk(closestWO, 25, 0.15);
         Continue;
       end;
 
@@ -2084,7 +2104,7 @@ begin
   if Self.Filter.UpText and (TRSWalkerObject.CurrentUpText <> Self.UpText) then
     TRSWalkerObject.CurrentUpText := Self.UpText;
 
-  if Self.Filter.Walker and not TRSWalkerObject.Walker^.MakePointVisible(Self.Coordinates) then
+  if Self.Filter.Walker and not ScriptWalker^.MakePointVisible(Self.Coordinates) then
     Exit;
 
   Result := (Async and Self._AsyncHoverHelper(attempts)) or Self._HoverHelper(attempts);
@@ -2121,6 +2141,8 @@ Example
   until MainScreen.IsUpText('ook');
 *)
 function TRSMMDot.WalkHover(attempts: Int32 = 2; Async: Boolean = USE_ASYNC_HOVER): Boolean;
+var
+  closestWO: TPoint;
 begin
   if ChooseOption.IsOpen() then
   begin
@@ -2135,8 +2157,9 @@ begin
   if Self.Filter.UpText and (TRSWalkerObject.CurrentUpText <> Self.UpText) then
     TRSWalkerObject.CurrentUpText := Self.UpText;
 
-  if not TRSWalkerObject.Walker^.MakePointVisible(Self.Coordinates) and
-     not TRSWalkerObject.Walker^.WebWalk(Self.Coordinates, 30, 0.15) then
+  closestWO := ScriptWalker^.GetClosestPoint(Self.Coordinates);
+  if not ScriptWalker^.MakePointVisible(closestWO) and
+     not ScriptWalker^.WebWalk(closestWO, 30, 0.15) then
       Exit;
 
   Result := (Async and Self._AsyncWalkHoverHelper(attempts)) or Self._WalkHoverHelper(attempts);
@@ -2368,10 +2391,10 @@ begin
   if Self = [] then
     Exit;
 
-  if TRSWalkerObject.Walker = nil then
+  if ScriptWalker = nil then
     Exit;
 
-  me := TRSWalkerObject.Walker^.GetMyPos();
+  me := ScriptWalker^.GetMyPos();
 
   hi := High(Self);
   for i := 0 to hi do

@@ -1,45 +1,45 @@
-## [13.3.14](https://github.com/Torwent/WaspLib/compare/v13.3.13...v13.3.14) (2023-05-28)
+## [14.7.2](https://github.com/Torwent/WaspLib/compare/v14.7.1...v14.7.2) (2023-09-12)
 
 
 ### Bug Fixes
 
-* Added Redwood region ([#61](https://github.com/Torwent/WaspLib/issues/61)) ([f2a1cd8](https://github.com/Torwent/WaspLib/commit/f2a1cd80827272301fb9de82dfe5681f1cf3c89c))
+* read notes ([dedc730](https://github.com/Torwent/WaspLib/commit/dedc730f54ce2094fb2e796c89731d3f704a1fda))
 
 
 
-## [13.3.13](https://github.com/Torwent/WaspLib/compare/v13.3.12...v13.3.13) (2023-05-25)
-
-
-### Bug Fixes
-
-* **webgraph:** added more paths to several niche locations ([ddf908d](https://github.com/Torwent/WaspLib/commit/ddf908d72e8b114fd370efb91326e84d56dd8fb7))
-
-
-
-## [13.3.12](https://github.com/Torwent/WaspLib/compare/v13.3.11...v13.3.12) (2023-05-24)
+## [14.7.1](https://github.com/Torwent/WaspLib/compare/v14.7.0...v14.7.1) (2023-09-11)
 
 
 ### Bug Fixes
 
-* **inventory:** read notes ([4ea8652](https://github.com/Torwent/WaspLib/commit/4ea86521074802a29af33314167aee9fdb584fbc))
+* read notes ([0cb4089](https://github.com/Torwent/WaspLib/commit/0cb4089be97a6da561a0b057eee0a597363f9956))
 
 
 
-## [13.3.11](https://github.com/Torwent/WaspLib/compare/v13.3.10...v13.3.11) (2023-05-24)
+# [14.7.0](https://github.com/Torwent/WaspLib/compare/v14.6.0...v14.7.0) (2023-09-10)
+
+
+### Features
+
+* **combathandler:** add dragon thrownaxe to spec weapons ([34bc560](https://github.com/Torwent/WaspLib/commit/34bc5603b81b3bdf710fe32266c533aa01eb2e23))
+
+
+
+# [14.6.0](https://github.com/Torwent/WaspLib/compare/v14.5.15...v14.6.0) (2023-09-10)
+
+
+### Features
+
+* **data:** add dragon thrownaxe to weapons.json ([e12bffa](https://github.com/Torwent/WaspLib/commit/e12bffa6bf4f016feba5960f0218d4748e52a182))
+
+
+
+## [14.5.15](https://github.com/Torwent/WaspLib/compare/v14.5.14...v14.5.15) (2023-09-07)
 
 
 ### Bug Fixes
 
-* read notes ([5fafd86](https://github.com/Torwent/WaspLib/commit/5fafd86680bfe8240fe7109a1044622294e75184))
-
-
-
-## [13.3.10](https://github.com/Torwent/WaspLib/compare/v13.3.9...v13.3.10) (2023-05-24)
-
-
-### Bug Fixes
-
-* **combathandler:** should now stop trying to alch the weapon and shield ([07d9b3f](https://github.com/Torwent/WaspLib/commit/07d9b3fd5739dae06f68ab9b5906ac7fe30ac7cb))
+* read notes ([8e38d73](https://github.com/Torwent/WaspLib/commit/8e38d73fd0a564e85578369ed1ae873f86edd2bc))
 
 
 

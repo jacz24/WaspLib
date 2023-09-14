@@ -33,6 +33,22 @@ type
     Clerris,
     AlryTheAngle,
 
+    Fayeth,
+    Heskel,
+    Alain,
+    Treznor,
+    PrissyScilla,
+    Rosie,
+
+    GielinorGuide,
+    SurvivalExpert,
+    MasterChef,
+    QuestGuide,
+    MiningInstructor,
+    CombatInstructor,
+
+    Kaqemeex,
+
     SpiritAngler: TRSNPC;
   end;
 
@@ -42,7 +58,7 @@ begin
   begin
     with AnyNPC do
     begin
-      Setup(80, 1, [TRSNPC.Walker^.GetMyPos()]);
+      Setup(80, 1, [ScriptWalker^.GetMyPos()]);
       _Setup();
       Filter.Finder := False;
       DotType := ERSMinimapDot.NPC;
@@ -82,9 +98,9 @@ begin
 
     with ShiloVillageBankers do
     begin
-      Setup(2, 6, [[6808, 4628], [6799, 4631]]);
+      Setup(10  , 6, [[6798, 4630]]);
       Setup(['anker']);
-      Finder.ColorClusters += [CTS2(7498611, 14, 1.43, 0.07), CTS2(477268, 8, 0.09, 2.07)];
+      Finder.Colors += CTS2(7434873, 11, 0.20, 0.11);
     end;
 
     with Man do
@@ -173,8 +189,11 @@ begin
 
     with SawmillOperator do
     begin
-      Setup(4, 6, [[8602, 2480], [4115, 2079]]);
+      Setup(6, 6, [[8601, 2481], [4115, 2079]]);
       Setup(['Sawmill', 'operator']);
+      Finder.Colors += CTS2(7246780, 13, 0.03, 1.12);
+      Finder.Colors += CTS2(10596542, 11, 0.17, 0.43);
+      Finder.Colors += CTS2(1541014, 11, 0.06, 0.37);
       Finder.ColorClusters += [CTS2(6909297, 9, 0.26, 0.07), CTS2(5077678, 19, 0.02, 0.62), 15];
       Finder.ColorClusters += [CTS2(945028, 12, 0.13, 0.29), CTS2(8821160, 19, 0.16, 0.29), 15];
     end;
@@ -219,6 +238,90 @@ begin
       Setup(['Captain', 'Pudi', 'Dudi', 'First', 'Mate', 'Peri', 'Deri']);
       Finder.Colors += CTS2(3232865, 8, 0.18, 1.31);
       Finder.Colors += CTS2(4803150, 9, 0.39, 0.19);
+    end;
+
+    with Fayeth do
+    begin
+      Setup(40, 7, [[8157,3528]]);
+      Setup(['Fayeth']);
+      Finder.Colors += CTS2(5270146, 4, 0.22, 2.33);
+    end;
+
+    with Heskel do
+    begin
+      Setup(40, 7, [[7409, 2940]]);
+      Setup(['Heskel']);
+      Finder.Colors += CTS2(5270146, 5, 0.22, 2.33);
+    end;
+
+    with Alain do
+    begin
+      Setup(40, 7, [[7137,2696]]);
+      Setup(['Alain']);
+      Finder.Colors += CTS2(11448247, 22, 0.09, 0.15);
+    end;
+
+    with Treznor do
+    begin
+      Setup(40, 7, [[8309,2611]]);
+      Setup(['Treznor']);
+      Finder.Colors += CTS2(5266786, 13, 0.21, 0.62);
+    end;
+
+    with PrissyScilla do
+    begin
+      Setup(40, 7, [[5137,2787]]);
+      Setup(['Prissy Scilla']);
+      Finder.Colors += CTS2(2776687, 6, 0.38, 5.12);
+    end;
+
+    with Rosie do
+    begin
+      Setup(40, 7, [[322, 1515]]);
+      Setup(['Rosie']);
+      Finder.Colors += CTS2(4350060, 9, 0.10, 0.99);
+    end;
+
+    with GielinorGuide do
+    begin
+      Setup(15, 6, [[7770, 4019]]);
+      Setup(['Gielinor Guide']);
+      Finder.Colors += CTS2(1451661, 6, 0.07, 0.49);
+    end;
+
+    with SurvivalExpert do
+    begin
+      Setup(15, 6, [[7804, 4063]]);
+      Setup(['Survival Expert']);
+      Finder.Colors += CTS2(5790605, 4, 0.09, 0.08);
+    end;
+
+    with MasterChef do
+    begin
+      Setup(15, 6, [[7697, 4111]]);
+      Setup(['Master Chef']);
+      Finder.Colors += CTS2(7841398, 6, 0.06, 0.76);
+    end;
+
+    with QuestGuide do
+    begin
+      Setup(15, 6, [[7735, 3963]]);
+      Setup(['Quest Guide']);
+      Finder.Colors += CTS2(3824422, 5, 0.11, 0.31);
+    end;
+
+    with MiningInstructor do
+    begin
+      Setup(15, 6, [[9555, 5129]]);
+      Setup(['Mining Instructor']);
+      Finder.Colors += CTS2(6764131, 11, 0.03, 0.04);
+    end;
+
+    with CombatInstructor do
+    begin
+      Setup(15, 6, [[9664, 5101]]);
+      Setup(['Combat Instructor']);
+      Finder.Colors += CTS2(7443902, 11, 0.02, 1.30);
     end;
   end;
 end;

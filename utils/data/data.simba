@@ -14,7 +14,7 @@ const
   ITEM_DATA_VERSION = '1';
   MONSTER_DATA_VERSION = '1';
   OBJECTS_JSON  = {$macro CURRENT_DIRECTORY} + '/objects.json';
-  WEAPONS_JSON  = {$macro CURRENT_DIRECTORY} + '/weapons.json';
+
 (*
 const PRICES_URL
 ~~~~~~~~~~~~~~~~~
@@ -30,8 +30,11 @@ Can be changed to use a different items data json as long as it has follows OSRS
 *)
   OSRSBOX_URL = 'https://raw.githubusercontent.com/Flipping-Utilities/osrsbox-db/main/docs/items-json/';
 
-
-type ItemData = record(TSRLBaseRecord) class var
+(*
+type ItemData
+~~~~~~~~~~~~~
+.. pascal::
+  type ItemData = record(TSRLBaseRecord) class var
     ItemNames: TStringList;
     PriceData: TJSONObject;
     OSRSBoxData: TJSONObject;
@@ -44,19 +47,20 @@ type ItemData = record(TSRLBaseRecord) class var
     DATA_PATH: String = WL_DATAPATH + 'cache' + DIRECTORYSEPARATOR + 'items' + DIRECTORYSEPARATOR + ITEM_DATA_VERSION + DIRECTORYSEPARATOR;
   end;
 
-(*
-ItemData.Free()
-~~~~~~~~~~~~~~~
-.. pascal:: procedure ItemData.Free();
-
-Internal method called automatically on script termination.
-Shouldn't be called by users other wise another termination will be attempted when the script stops running.
+Static ItemData type, responsible to handle anything that is related to item data.
 *)
-procedure ItemData.Terminate(); static;
-begin
-  ItemData.ItemNames.Free();
-  ItemData.PriceData.Free();
-end;
+type ItemData = record(TSRLBaseRecord) class var
+    ItemNames: TStringList;
+    PriceData: TJSONObject;
+    OSRSBoxData: TJSONObject;
+    ReloadTimer: TCountDown;
+    PriceIsSetup: Boolean;
+    OSRSBoxIsSetup: Boolean;
+    PricesDisconnected: Boolean;
+    OSRSBoxDisconnected: Boolean;
+  class const
+    DATA_PATH: String = WL_DATAPATH + 'cache' + DIRECTORYSEPARATOR + 'items' + DIRECTORYSEPARATOR + ITEM_DATA_VERSION + DIRECTORYSEPARATOR;
+  end;
 
 (*
 ItemData.SetupWikiPrices()
@@ -73,11 +77,9 @@ var
 begin
   if not ItemData.PriceIsSetup then
   begin
-    ItemData.ItemNames.Init();
-    ItemData.ItemNames.LoadFromFile(ITEM_FINDER_ITEM_NAMES_FILE);
-    ItemData.ItemNames.SetSorted(True);
+    ItemData.ItemNames := ItemFinder.ItemNames;
 
-    AddOnTerminate(@ItemData.Terminate);
+    AddOnTerminate(@ItemData.PriceData.Free);
     ItemData.PriceIsSetup := True;
     ItemData.ReloadTimer.Setup(20 * ONE_MINUTE);
   end;
@@ -344,7 +346,7 @@ Example
 -------
   WriteLn ItemData.GetOSRSBoxBoolean('Abyssal whip', 'tradeable_on_ge');
 *)
-function ItemData.GetOSRSBoxBoolean(item: TRSItem; Key: String): Boolean; static;
+function ItemData.GetOSRSBoxBoolean(item: TRSItem; key: String): Boolean; static;
 var
   id: Integer;
   OSRSBoxJSON: TJSONObject;
@@ -357,7 +359,7 @@ begin
   if OSRSBoxJSON = nil then
     Exit;
 
-  Result := OSRSBoxJSON.getBoolean(Key);
+  Result := OSRSBoxJSON.getBoolean(key);
 end;
 
 (*
@@ -423,31 +425,34 @@ begin
               ItemData.GetAverage(id) - ItemData.GetAverage('561');
 end;
 
-
-
+type
 (*
 type ERSAttackType
 ~~~~~~~~~~~~~~~~~~
 
-Attack types in game.
+Enum of Attack types in game.
 Can be used to know what to pray for example.
-
-type TRSMonsterDrop
-~~~~~~~~~~~~~~~~~~~
-
-Helper record to handle monster drops. Has several variable that hold information about monster
-drops such as wether it's stackable and/or noted and quantity.
-
-type TRSMonsterData
-~~~~~~~~~~~~~~~~~~~
-
-Main record to handle monster data.
 *)
-type
   ERSAttackType = (
     MELEE_ATTACK_TYPE, RANGED_ATTACK_TYPE, MAGIC_ATTACK_TYPE, TYPELESS_ATTACK_TYPE
   );
+(*
+type TRSMonsterDrop
+~~~~~~~~~~~~~~~~~~~
+.. pascal::
+  type
+    TRSMonsterDrop = record
+      Item: String;
+      ID: String;
+      Stackable: Boolean;
+      Noted: Boolean;
+      Quantity: Int32;
+    end;
+    TRSMonsterDropArray = array of TRSMonsterDrop;
 
+Helper record to handle monster drops. Has several variable that hold information about monster
+drops such as wether it's stackable and/or noted and quantity.
+*)
   TRSMonsterDrop = record
     Item: String;
     ID: String;
@@ -503,12 +508,28 @@ begin
 
     tmp += best;
   end;
-  WriteLn Self;
-  WriteLn tmp;
+
   Self := tmp;
 end;
 
-type MonsterData = record(TSRLBaseRecord) class var
+
+(*
+type MonsterData
+~~~~~~~~~~~~~~~~
+.. pascal::
+  type MonsterData = record(TSRLBaseRecord) class var
+    Names: TStringList;
+    Data: TJSONObject;
+    IsSetup: Boolean;
+  class const
+    MONSTER_NAMES: String = {$macro CURRENT_DIRECTORY} + '/monster-names';
+    MONSTERS_ZIP: String  = {$macro CURRENT_DIRECTORY} + '/monsters.zip';
+    DATA_PATH: String = WL_DATAPATH + 'cache' + DIRECTORYSEPARATOR + 'monsters' + DIRECTORYSEPARATOR + MONSTER_DATA_VERSION + DIRECTORYSEPARATOR;
+  end;
+
+Static MonsterData type, responsible to handle anything that is related to monsters data.
+*)
+  type MonsterData = record(TSRLBaseRecord) class var
     Names: TStringList;
     Data: TJSONObject;
     IsSetup: Boolean;
@@ -705,21 +726,17 @@ Method used to get an array of ERSAttackType used by the specified monster.
 *)
 function MonsterData.GetAttackTypes(monster: String): array of ERSAttackType; static;
 var
-  JSONArray: TJSONArray;
+  jsonArray: TJSONArray;
   i: Int32;
 begin
-  JSONArray := MonsterData.GetJSONArray(Monster, 'attack_type');
+  jsonArray := MonsterData.GetJSONArray(monster, 'attack_type');
 
-  for i := 0 to JSONArray.length - 1 do
-    case JSONArray.getString(i) of
-      'stab', 'slash', 'crush':
-        Result += MELEE_ATTACK_TYPE;
-      'ranged':
-        Result += RANGED_ATTACK_TYPE;
-      'magic':
-        Result += MAGIC_ATTACK_TYPE;
-      'typeless':
-        Result += TYPELESS_ATTACK_TYPE;
+  for i := 0 to jsonArray.length() - 1 do
+    case jsonArray.getString(i) of
+      'stab', 'slash', 'crush': Result += ERSAttackType.MELEE_ATTACK_TYPE;
+      'ranged':   Result += ERSAttackType.RANGED_ATTACK_TYPE;
+      'magic':    Result += ERSAttackType.MAGIC_ATTACK_TYPE;
+      'typeless': Result += ERSAttackType.TYPELESS_ATTACK_TYPE;
     end;
 end;
 
@@ -785,41 +802,50 @@ begin
 end;
 
 (*
-type TRSWeaponData
-~~~~~~~~~~~~~~~~~~
-Record used to fetch weapon information
-*)
-type
-  TRSWeaponData = record
+type WeaponData
+~~~~~~~~~~~~~~~
+.. pascal::
+  type
+  WeaponData = record(TSRLBaseRecord) class var
     Data: TJSONObject;
     IsSetup: Boolean;
+  end;
+
+Static WeaponData type, responsible to handle anything that is related to weapons data.
+*)
+type
+  WeaponData = record(TSRLBaseRecord) class var
+    Data: TJSONObject;
+    IsSetup: Boolean;
+  class const
+    WEAPONS_JSON  = {$macro CURRENT_DIRECTORY} + '/weapons.json';
   end;
 
 (*
 WeaponData.Setup()
 ~~~~~~~~~~~~~~~~~~
-.. pascal:: procedure TRSWeaponData.Setup();
+.. pascal:: procedure WeaponData.Setup();
 
-Internal method to setup TRSWeaponData.
+Internal method to setup WeaponData.
 *)
-procedure TRSWeaponData.Setup();
+procedure WeaponData.Setup(); static;
 begin
-  if Self.IsSetup then
+  if WeaponData.IsSetup then
     Exit;
 
   WriteLn('Loading weapons.json.');
 
-  Self.Data.Init(ReadFileContents(WEAPONS_JSON));
+  WeaponData.Data.Init(ReadFileContents(WeaponData.WEAPONS_JSON));
 
-  AddOnTerminate(@Self.Data.Free);
+  AddOnTerminate(@WeaponData.Data.Free);
 
-  Self.IsSetup := True;
+  WeaponData.IsSetup := True;
 end;
 
 (*
 WeaponData.GetInt()
 ~~~~~~~~~~~~~~~~~~~
-.. pascal:: function TRSWeaponData.GetInt(Weapon, Key: String): Int32;
+.. pascal:: function WeaponData.GetInt(Weapon, Key: String): Int32;
 
 Method to fetch integer data from weapons.json.
 
@@ -830,18 +856,18 @@ Example
 
   WriteLn WeaponData.GetInt('Abyssal whip', 'special_attack'); //This will print 50.
 *)
-function TRSWeaponData.GetInt(Weapon, Key: String): Int32;
+function WeaponData.GetInt(Weapon, Key: String): Int32; static;
 begin
-  if not Self.IsSetup then
-    Self.Setup;
+  if not WeaponData.IsSetup then
+    WeaponData.Setup;
 
-  Result := Self.Data.getJSONObject(Weapon).getInt(Key);
+  Result := WeaponData.Data.getJSONObject(Weapon).getInt(Key);
 end;
 
 (*
 WeaponData.GetAttackType()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. pascal:: function TRSWeaponData.GetAttackType(Weapon: String): ERSAttackType;
+.. pascal:: function WeaponData.GetAttackType(Weapon: String): ERSAttackType;
 
 Returns the ERSAttackType of the weapon specified.
 
@@ -850,22 +876,22 @@ Example
 
   WriteLn WeaponData.GetAttackType('Abyssal whip'); //This will print MELEE_ATTACK_TYPE.
 *)
-function TRSWeaponData.GetAttackType(Weapon: String): ERSAttackType;
+function WeaponData.GetAttackType(Weapon: String): ERSAttackType; static;
 begin
-  if not Self.IsSetup then
-    Self.Setup;
+  if not WeaponData.IsSetup then
+    WeaponData.Setup();
 
-  case Self.Data.getJSONObject(Weapon).getString('type') of
-    'melee':  Result := MELEE_ATTACK_TYPE;
-    'ranged': Result := RANGED_ATTACK_TYPE;
-    'magic':  Result := MAGIC_ATTACK_TYPE;
+  case WeaponData.Data.getJSONObject(Weapon).getString('type') of
+    'melee':  Result := ERSAttackType.MELEE_ATTACK_TYPE;
+    'ranged': Result := ERSAttackType.RANGED_ATTACK_TYPE;
+    'magic':  Result := ERSAttackType.MAGIC_ATTACK_TYPE;
   end;
 end;
 
 (*
 WeaponData.IsTwoHanded()
 ~~~~~~~~~~~~~~~~~~~~~~~~
-.. pascal:: function TRSWeaponData.IsTwoHanded(Weapon: String): Boolean;
+.. pascal:: function WeaponData.IsTwoHanded(Weapon: String): Boolean;
 
 Returns wether the weapon is two-handed or not.
 
@@ -874,38 +900,28 @@ Example
 
   WriteLn WeaponData.IsTwoHanded('Abyssal whip'); //This will print false.
 *)
-function TRSWeaponData.IsTwoHanded(Weapon: String): Boolean;
+function WeaponData.IsTwoHanded(Weapon: String): Boolean; static;
 begin
-  if not Self.IsSetup then
-    Self.Setup;
+  if not WeaponData.IsSetup then
+    WeaponData.Setup;
 
-  Result := Self.Data.getJSONObject(Weapon).getBoolean('two-handed');
+  Result := WeaponData.Data.getJSONObject(Weapon).getBoolean('two-handed');
 end;
 
 (*
 WeaponData.GetRequirementsJSON()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. pascal:: function TRSWeaponData.GetRequirementsJSON(Weapon: String): TJSONObject;
+.. pascal:: function WeaponData.GetRequirementsJSON(Weapon: String): TJSONObject;
 
 Returns a TJSONObject of the level requirements for the weapon.
 *)
-function TRSWeaponData.GetRequirementsJSON(Weapon: String): TJSONObject;
+function WeaponData.GetRequirementsJSON(Weapon: String): TJSONObject; static;
 begin
-  if not Self.IsSetup then
-    Self.Setup;
+  if not WeaponData.IsSetup then
+    WeaponData.Setup;
 
-  Result := Self.Data.getJSONObject(Weapon).getJSONObject('level_requirements');
+  Result := WeaponData.Data.getJSONObject(Weapon).getJSONObject('level_requirements');
 end;
-
-(*
-var WeaponData
-~~~~~~~~~~~~~~
-  Global WeaponData variable.
-*)
-{$H-}
-var
-  WeaponData: TRSWeaponData;
-{$H+}
 
 
 type

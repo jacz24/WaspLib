@@ -1,0 +1,681 @@
+(*
+MainScreen
+====
+Methods to interact with the MainScreen.
+*)
+
+{$DEFINE WL_MAINSCREEN_INCLUDED}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+(*
+ObjectFinder.Unlimit
+~~~~~~~~~~~~~~~~~~~~
+.. pascal:: procedure TRSObjectFinder.Unlimit;
+
+Resets ObjectFinder size limits
+*)
+procedure TRSObjectFinder.Unlimit();
+begin
+  Self.MinLongSide := 0;
+  Self.MaxLongSide := 0;
+  Self.MinShortSide := 0;
+  Self.MaxShortSide := 0;
+end;
+
+(*
+ObjectFinder.Unlimited
+~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSObjectFinder.Unlimited: TRSObjectFinder;
+
+Returns a copy of the ObjectFinder with the size limits removed.
+*)
+function TRSObjectFinder.Unlimited(): TRSObjectFinder;
+begin
+  Result := Self;
+  Result.MinShortSide := 0;
+  Result.MaxShortSide := 0;
+  Result.MinLongSide := 0;
+  Result.MaxLongSide := 0;
+end;
+
+
+(*
+MainScreen.IsVisible
+~~~~~~~~~~~~~~~~~~~~
+.. pascal::
+  function TRSMainScreen.IsVisible(P: TPoint): Boolean; override;
+  function TRSMainScreen.IsVisible(TPA: TPointArray): Boolean; overload;
+  function TRSMainScreen.IsVisible(B: TBox): Boolean; overload;
+  function TRSMainScreen.IsVisible(Rect: TRectangle): Boolean; overload;
+
+Checks if the given TPoint, TPointArray, TBox or TRectangle is visible in the MainScreen.
+It will return true if it's not behind an interface otherwise returns false.
+
+Example
+-------
+
+  Writeln MainScreen.IsVisible(P);
+*)
+function TRSMainScreen.IsVisible(p: TPoint): Boolean; override;
+begin
+  Result := Self.Bounds.Expand(-10).Contains(P);
+
+  if Result and (RSClient.Mode <> ERSClientMode.FIXED) then
+  begin
+    if Self.HasInterface then
+    begin
+      if Bank.Bounds.Expand(5).Contains(P) and Bank.IsOpen then
+        Exit(False);
+      if Anvil.Bounds.Expand(5).Contains(P) and Anvil.IsOpen then
+        Exit(False);
+    end;
+
+    if Chat.Bounds.Expand(5).Contains(P) and Chat.IsOpen then
+      Exit(False);
+    if ChatButtons.Bounds.Expand(5).Contains(P) then
+      Exit(False);
+    if Minimap.Bounds.Expand(55).Contains(P) then
+      Exit(False);
+    if GameTabs.Bounds.Expand(5).Contains(P) then
+      Exit(False);
+  end;
+end;
+
+function TRSMainScreen.IsVisible(tpa: TPointArray; useHull: Boolean = True): Boolean; overload;
+begin
+  if useHull then
+    tpa := tpa.ConvexHull();
+  Result := Self.Bounds().Expand(-10).Contains(tpa);
+
+  if not Result then
+    Exit;
+
+  if RSClient.Mode <> ERSClientMode.FIXED then
+  begin
+    if Self.HasInterface() then
+    begin
+      if Bank.Bounds().Expand(5).Contains(tpa) and Bank.IsOpen() then
+        Exit(False);
+      if Anvil.Bounds().Expand(5).Contains(tpa) and Anvil.IsOpen() then
+        Exit(False);
+    end;
+
+    if Chat.Bounds().Expand(5).Contains(tpa) and Chat.IsOpen() then
+      Exit(False);
+    if ChatButtons.Bounds().Expand(5).Contains(tpa) then
+      Exit(False);
+    if Minimap.Bounds().Expand(55).Contains(tpa) then
+      Exit(False);
+    if GameTabs.Bounds().Expand(5).Contains(tpa) then
+      Exit(False);
+  end;
+end;
+
+function TRSMainScreen.IsVisible(box: TBox): Boolean; overload;
+begin
+  Result := Self.Bounds().Expand(-10).Contains(TBox.ToRectangle().ToTPA().FilterBox(Self.Bounds()));
+
+  if Result and (RSClient.Mode <> ERSClientMode.FIXED) then
+  begin
+    if Self.HasInterface() then
+    begin
+      if Bank.Bounds().Expand(5).Contains(box) and Bank.IsOpen() then
+        Exit(False);
+      if Anvil.Bounds().Expand(5).Contains(box) and Anvil.IsOpen() then
+        Exit(False);
+    end;
+
+    if Chat.Bounds.Expand(5).Contains(box) and Chat.IsOpen() then
+      Exit(False);
+    if ChatButtons.Bounds.Expand(5).Contains(box) then
+      Exit(False);
+    if Minimap.Bounds.Expand(55).Contains(box) then
+      Exit(False);
+    if GameTabs.Bounds.Expand(5).Contains(box) then
+      Exit(False);
+  end;
+end;
+
+function TRSMainScreen.IsVisible(rect: TRectangle): Boolean; overload;
+var
+  TPA: TPointArray;
+  b: TBox;
+begin
+  b := Self.Bounds.Expand(-10);
+  tpa := rect.ToTPA().FilterBox(b);
+
+  if tpa = [] then
+    Exit;
+
+  Result := b.Contains(tpa.FilterBox(b));
+
+  if Result and (RSClient.Mode <> ERSClientMode.FIXED) then
+  begin
+    if Self.HasInterface() then
+    begin
+      if Bank.Bounds.Expand(5).Contains(Rect) and Bank.IsOpen then
+        Exit(False);
+      if Anvil.Bounds.Expand(5).Contains(Rect) and Anvil.IsOpen then
+        Exit(False);
+    end;
+
+    if Chat.Bounds.Expand(5).Contains(Rect) and Chat.IsOpen then
+      Exit(False);
+    if ChatButtons.Bounds.Expand(5).Contains(Rect) then
+      Exit(False);
+    if Minimap.Bounds.Expand(55).Contains(Rect) then
+      Exit(False);
+    if GameTabs.Bounds.Expand(5).Contains(Rect) then
+      Exit(False);
+  end;
+end;
+
+function TRSMainScreen.IsVisible(cuboid: TCuboidEx): Boolean; overload;
+begin
+  Result := Self.IsVisible(cuboid.ConvexHull(), False);
+end;
+
+
+(*
+MainScreen.Filter
+~~~~~~~~~~~~~~~~~
+.. pascal::
+  function TRSMainScreen.Filter(tpa: TPointArray): TPointArray;
+  function TRSMainScreen.Filter(boxArray: TBoxArray): TBoxArray; overload;
+  function TRSMainScreen.Filter(rectArray: TRectArray): TRectArray; overload;
+  function TRSMainScreen.Filter(cuboidArray: TPolyArray): TPolyArray; overload;
+
+Filters the given TPointArray, TBoxArray, TRectArray or TCuboidArray and returns only those that are visible in the MainScreen.
+*)
+function TRSMainScreen.Filter(tpa: TPointArray): TPointArray;
+begin
+  Result := tpa := tpa.FilterBox(Self.Bounds());
+
+  if (Result = []) or (RSClient.Mode = ERSClientMode.FIXED) then
+    Exit;
+
+  if Self.HasInterface() then
+  begin
+    tpa := Result.FilterBox(InterfaceArea.Bounds());
+    Result := Result.Difference(tpa);
+  end;
+
+  if Chat.IsOpen() then
+  begin
+    tpa := Result.FilterBox(Chat.Bounds());
+    Result := Result.Difference(tpa);
+  end;
+
+  tpa := Result.FilterBox(ChatButtons.Bounds().Expand(0, 2));
+  Result := Result.Difference(tpa);
+
+  tpa := Result.FilterBox(Minimap.Bounds().Expand(54, 13));
+  Result := Result.Difference(tpa);
+
+  tpa := Result.FilterBox(GameTabs.Bounds());
+  Result := Result.Difference(tpa);
+end;
+
+function TRSMainScreen.Filter(arr: TBoxArray): TBoxArray; overload;
+var
+  i: Int32;
+begin
+  for i := 0 to High(arr) do
+    if Self.IsVisible(arr[i]) then
+      Result += arr[i];
+end;
+
+function TRSMainScreen.Filter(arr: TRectArray): TRectArray; overload;
+var
+  i: Int32;
+begin
+  for i := 0 to High(arr) do
+    if Self.IsVisible(arr[i]) then
+      Result += arr[i];
+end;
+
+function TRSMainScreen.Filter(arr: TCuboidExArray): TCuboidExArray; overload;
+var
+  i: Int32;
+begin
+  for i := 0 to High(arr) do
+    if Self.IsVisible(arr[i]) then
+      Result += arr[i];
+end;
+
+
+(*
+MainScreen.FilterInPolygon
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal::
+  function TRSMainScreen.FilterInPolygon(tpa, polygon: TPointArray): TPointArray;
+  function TRSMainScreen.FilterInPolygon(atpa: T2DPointArray; polygon: TPointArray): T2DPointArray; overload;
+
+Filters the given TPointArray or T2DPointArray and returns only those that are visible within a polygon on the mainScreen.
+*)
+function TRSMainScreen.FilterInPolygon(tpa, polygon: TPointArray): TPointArray;
+begin
+  tpa := Self.Filter(tpa);
+
+  if tpa = [] then
+    Exit;
+
+  polygon := polygon.LimitTo(MainScreen.Bounds());
+  if polygon = [] then
+    Exit;
+
+  polygon := polygon.Connect().ShapeFill();
+  polygon := Self.Filter(polygon);
+
+  if polygon = [] then
+    Exit;
+
+  Result := tpa.Intersection(polygon);
+end;
+
+function TRSMainScreen.FilterInPolygon(atpa: T2DPointArray; polygon: TPointArray): T2DPointArray; overload;
+var
+  tpa: TPointArray;
+begin
+  for tpa in atpa do
+  begin
+    tpa := Self.FilterInPolygon(tpa, polygon);
+    if tpa <> [] then
+      Result += tpa;
+  end;
+end;
+
+function TRSMainScreen.FilterInPolygon(atpa, polygonArray: T2DPointArray): T2DPointArray; overload;
+var
+  tpa: TPointArray;
+  polygon: TPointArray;
+begin
+  for tpa in atpa do
+  begin
+    for polygon in polygonArray do
+    begin
+      if not SRL.PointInPoly(tpa.Mean(), polygon) then
+        Continue;
+      tpa := Self.FilterInPolygon(tpa, polygon);
+      if tpa <> [] then
+        Result += tpa;
+    end;
+  end;
+end;
+
+
+
+
+(*
+MainScreen.GetAdjacentTiles
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.GetAdjacentTiles: TRectArray;
+
+Returns the 4 tiles adjacent to the player in form of a TRectArray.
+*)
+function TRSMainScreen.GetAdjacentTiles(): TRectArray;
+var
+  Tiles: TPointArray;
+  Tile: TPoint;
+begin
+
+  Tiles := [
+    [Minimap.Center.X + 4, Minimap.Center.Y],
+    [Minimap.Center.X - 4, Minimap.Center.Y],
+    [Minimap.Center.X, Minimap.Center.Y + 4],
+    [Minimap.Center.X, Minimap.Center.Y - 4]
+  ];
+
+  for Tile in Tiles do
+    Result += Minimap.StaticToMsRect(Tile, 0);
+end;
+
+(*
+MainScreen.DebugAdjacentTiles
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: procedure TRSMainScreen.DebugAdjacentTiles;
+
+Debugs MainScreen.GetAdjacentTiles.
+
+Example
+-------
+
+  MainScreen.DebugAdjacentTiles;
+*)
+procedure TRSMainScreen.DebugAdjacentTiles();
+var
+  Bitmap: TMufasaBitmap;
+  Rect: TRectangle;
+begin
+  Bitmap.FromClient;
+
+  for Rect in Self.GetAdjacentTiles do
+    Bitmap.DrawRect(Rect, $ffffff);
+
+  ShowBitmap(Bitmap);
+  Bitmap.Free;
+end;
+
+(*
+MainScreen.InMultiCombat
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.InMultiCombat: Boolean;
+
+Returns true if we are in multi combat false if not.
+
+Example
+-------
+
+  Writeln MainScreen.InMultiCombat;
+*)
+function TRSMainScreen.InMultiCombat(): Boolean;
+var
+  B: TBox;
+begin
+  case RSClient.Mode of
+    ERSClientMode.FIXED:
+      begin
+        B := InterfaceArea.Bounds;
+        B.X1 := B.X2 - 30;
+        B.Y1 := B.Y2 - 30;
+      end;
+    ERSClientMode.RESIZABLE_CLASSIC, ERSClientMode.RESIZABLE_MODERN:
+      begin
+        B := Minimap.Bounds;
+        B.X1 := B.X2 - 30;
+        B.Y1 := B.Y2 + 5;
+        B.Y2 := B.Y1 + 30;
+      end;
+  end;
+
+  Result := (SRL.CountColor(CTS0(4902655, 0), B) > 0) and (SRL.CountColor(CTS0(19109, 0), B) > 0);
+end;
+
+(*
+MainScreen.FindGrave
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.FindGrave: Boolean;
+
+Returns true if we died and there's a grave available somewhere, false otherwise.
+
+Example
+-------
+
+  Writeln MainScreen.FindGrave;
+*)
+function TRSMainScreen.FindGrave(): Boolean;
+var
+  A: TPoint;
+  B: TBox;
+begin
+  case RSClient.Mode of
+    ERSClientMode.FIXED:
+      begin
+        B := InterfaceArea.Bounds;
+        B.X1 := B.X2 - 90;
+        B.Y1 := B.Y2 - 30;
+      end;
+    ERSClientMode.RESIZABLE_CLASSIC, ERSClientMode.RESIZABLE_MODERN:
+      begin
+        A := Minimap.Center;
+        B.X1 := A.X - 50;
+        B.X2 := A.X + 40;
+        B.Y1 := A.Y + 82;
+        B.Y2 := A.Y + 120;
+      end;
+  end;
+
+  Result :=  SRL.CountColor(CTS0(11448498, 0), B) = 51;
+end;
+
+(*
+MainScreen.LoadingPOH
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.LoadingPOH: Boolean;
+
+Returns true if we are loading a poh.
+
+Example
+-------
+
+  Writeln MainScreen.LoadingPOH;
+*)
+function TRSMainScreen.LoadingPOH(): Boolean;
+begin
+  Result := (SRL.CountColor(CTS0(13127, 0), Self.Bounds) = 892) and
+            (SRL.CountColor(CTS0(8247, 0), Self.Bounds) = 900);
+end;
+
+(*
+MainScreen.WaitLoadingPOH
+~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.WaitLoadingPOH: Boolean;
+
+Waits for the POH loading screen returns true if we find a loading screen and successfully wait for it to finish.
+
+Example
+-------
+
+  Writeln MainScreen.WaitLoadingPOH;
+*)
+function TRSMainScreen.WaitLoadingPOH(WaitTime: Int32; Interval: Int32 = -1): Boolean;
+var
+  t: UInt64;
+begin
+  if (Interval = -1) then
+    Interval := SRL.TruncatedGauss(50, 1500);
+
+  t := GetTickCount;
+  if WaitUntil(Self.LoadingPOH(), Interval, WaitTime) then
+  begin
+    WaitTime := WaitTime - (GetTickCount - t);
+    Result := WaitUntil(not Self.LoadingPOH, Interval, WaitTime);
+  end;
+end;
+
+
+(*
+MainScreen.FindEnemyHitsplats
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.FindEnemyHitsplats(): Boolean;
+
+Returns the hitsplats on screen that don't belong to the player.
+
+Example
+-------
+
+  Debug(MainScreen.FindEnemyHitsplats());
+*)
+function TRSMainScreen.FindEnemyHitsplats(waitTime: Int32): TRSHitsplatArray;
+var
+  t: UInt64;
+  l:Int32;
+  tmp, splats: TRSHitsplatArray;
+  b: TBox;
+  splat: TRSHitsplat;
+begin
+  t := GetTickCount() + waitTime;
+  repeat
+    tmp := Self.FindHitsplats();
+    if Length(tmp) > 0 then
+    begin
+      l := Length(splats);
+      SetLength(splats, Length(tmp) + l);
+      MemMove(tmp[0],splats[L],Length(tmp)*SizeOf(TRSHitsplat));
+    end;
+  until GetTickCount() >= t;
+
+  if splats = [] then
+    Exit;
+
+  b := Self.GetPlayerBox();
+  for splat in splats do
+    if not b.Contains(splat.Position) then
+      Result += splat;
+end;
+
+(*
+MainScreen.InCombat
+~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.InCombat: Boolean;
+
+Returns true if we are currently in combat.
+With slow attack speed between you and the enemy this might return false negatives.
+
+Example
+-------
+
+  Writeln MainScreen.InCombat;
+*)
+function TRSMainScreen.InCombat(): Boolean;
+begin
+  Result := XPBar.EarnedXP() or (Self.FindHitsplats() <> []);
+end;
+
+(*
+MainScreen.WaitInCombat
+~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.WaitInCombat(waitTime: Int32; interval: Int32 = -1): Boolean;
+
+Waits the specified **waitTime** until we are in combat.
+
+Example
+-------
+
+  MainScreen.WaitInCombat(5000);
+*)
+function TRSMainScreen.WaitInCombat(waitTime: Int32; interval: Int32 = -1): Boolean;
+begin
+  if (interval = -1) then
+    interval := SRL.TruncatedGauss(50, 300);
+
+  Result := WaitUntil(Self.InCombat(), interval, waitTime);
+end;
+
+(*
+MainScreen.WaitNotInCombat
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.WaitNotInCombat(waitTime: Int32; interval: Int32 = -1): Boolean;
+
+Waits the specified **waitTime** until we are nto in combat.
+
+Example
+-------
+
+  MainScreen.WaitNotInCombat(5000);
+*)
+function TRSMainScreen.WaitNotInCombat(waitTime: Int32; interval: Int32 = -1): Boolean;
+begin
+  if (interval = -1) then
+    interval := SRL.TruncatedGauss(50, 300);
+
+  Result := WaitUntil(not Self.InCombat(), interval, waitTime);
+end;
+
+
+(*
+MainScreen.FindArrow
+~~~~~~~~~~~~~~~~~~~~
+.. pascal:: function TRSMainScreen.FindArrow(out TPA: TPointArray): Boolean;
+.. pascal:: function TRSMainScreen.FindArrow: Boolean; overload;
+
+Returns true if there's a yellow arrow on screen.
+If a TPointArray is passed as a parameter it will return with the location of the arrow tip.
+
+Example
+-------
+
+  Writeln MainScreen.FindArrow;
+*)
+function TRSMainScreen.FindArrow(out TPA: TPointArray): Boolean;
+var
+  TempTPA: TPointArray;
+begin
+  Result := (SRL.FindColors(TempTPA, CTS0(2291706, 0), Self.Bounds) > 0) and
+            (Length(TempTPA) <= 35);
+  if Result then
+    TPA := Self.Filter(TempTPA);
+end;
+
+function TRSMainScreen.FindArrow(): Boolean; overload;
+var
+  TPA: TPointArray;
+begin
+  Result := (SRL.FindColors(TPA, CTS0(2291706, 0), Self.Bounds) > 0) and
+            (Length(TPA) <= 35);
+end;
+
+(*
+MainScreen.WaitArrow
+~~~~~~~~~~~~~~~~~~~~
+.. pascal::
+  function TRSMainScreen.WaitArrow(TPA: TPointArray; WaitTime: Int32 = 600; Interval: Int32 = -1): Boolean;
+  function TRSMainScreen.WaitArrow(WaitTime: Int32 = 600; Interval: Int32 = -1): Boolean;
+
+Waits **WaitTime** for a yellow arrow to appear on MainScreen.
+If a TPointArray is passed as a parameter it will return with the location of the arrow tip.
+
+Example
+-------
+
+  Writeln MainScreen.WaitArrow;
+*)
+function TRSMainScreen.WaitArrow(out TPA: TPointArray; WaitTime: Int32 = 120; Interval: Int32 = -1): Boolean;
+begin
+  if (Interval = -1) then
+    Interval := SRL.TruncatedGauss(50, 200);
+
+  Result := WaitUntil(Self.FindArrow(TPA), Interval, WaitTime);
+end;
+
+function TRSMainScreen.WaitArrow(WaitTime: Int32 = 120; Interval: Int32 = -1): Boolean; overload;
+begin
+  if (Interval = -1) then
+    Interval := SRL.TruncatedGauss(50, 200);
+
+  Result := WaitUntil(Self.FindArrow, Interval, WaitTime);
+end;
+
+function TRSMainScreen.IsUpText(text: TStringArray; timeout: Int32; out index: Int32; caseSensitive: Boolean = True): Boolean; overload;
+
+  function IsUpText(): Boolean;
+  var
+    upText: String;
+  begin
+    upText := Self.GetUpText();
+
+    if not caseSensitive then
+      upText := upText.ToLower();
+
+    for index := 0 to High(text) do
+    begin
+      if (text[index] in upText) or (text[index] = upText) then
+        Exit(True);
+    end;
+  end;
+
+var
+  t: UInt64;
+begin
+  if (timeout = -1) then
+    t := GetTickCount() + Round(SRL.SkewedRand(100, 85, 250))
+  else
+    t := GetTickCount() + timeout;
+
+  if not caseSensitive then
+    text := text.ToLower();
+
+  repeat
+    if IsUpText() then
+    begin
+      Wait(50); // Uptext is delayed at least a frame. wait 50ms for confirmation.
+      if IsUpText() then
+        Exit(True);
+    end;
+
+    Wait(25);
+  until (GetTickCount() >= t);
+end;
+

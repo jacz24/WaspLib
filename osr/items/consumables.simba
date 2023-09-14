@@ -28,9 +28,9 @@ TRSConsumable is the record used in all consumables. It contains base properties
 *)
   TRSConsumable = record
     Item: TRSItem;
+    BankItem: TRSBankItem;
     Points: UInt32;
     Timer: UInt32;
-    BankTab: Int32;
     Cost: Int32;
     IsSetup: Boolean;
   end;
@@ -101,21 +101,7 @@ This type of consumable has a timer to keep track when it lost it's effect after
   end;
   TRSBoosArray = array of TRSBoost;
 
-(*
-ItemArray.Find
-~~~~~~~~~~~~~~
-.. pascal:: function TRSItemArray.Find(const Value: TRSItem): Integer; constref;
 
-Find a TRSItem in a TRSItemArray.
-*)
-function TRSItemArray.Find(const Value: TRSItem): Integer; constref;
-begin
-  for Result := 0 to High(Self) do
-    if (Value = Self[Result]) then
-      Exit;
-
-  Result := -1;
-end;
 
 (*
 GetConsumableArray
@@ -144,12 +130,12 @@ Consumable.Setup
 
 Used internally by consumable handlers/managers to setup common things among all consumable records.
 *)
-procedure TRSConsumable.Setup();
+procedure TRSConsumable._Setup();
 begin
   if Self.IsSetup then
     Exit;
 
-  Self.BankTab := -1;
+  Self.BankItem := TRSBankItem.Setup(Self.Item);
   Self.Cost := ItemData.GetAverage(Self.Item.GetSingle());
   Self.IsSetup := True;
 end;
@@ -185,7 +171,7 @@ begin
       Self.Points := 9;
     'Tuna', 'Dragonfruit pie(1..2)':
       Self.Points := 10;
-    'Jug of wine', 'Rainbow fish', 'Stew', 'Banana stew', 'Pineapple pizza(2..(1)',
+    'Jug of wine', 'Rainbow fish', 'Stew', 'Banana stew', 'Pineapple pizza(1..2)',
     'Summer pie(1..2)', 'Wild pie(1..2)':
       Self.Points := 11;
     'Lobster':
@@ -210,7 +196,7 @@ begin
       Self.Points := 22;
     'Anglerfish':
       begin
-        HPLevel := BaseStats.GetCurrentLevel(ERSSkill.HitPoints);
+        HPLevel := Stats.GetLevel(ERSSkill.HitPoints);
         case HPLevel of
           10..24: Self.Points := Floor(HPLevel * 0.1) + 2;
           25..49: Self.Points := Floor(HPLevel * 0.1) + 4;
@@ -220,10 +206,10 @@ begin
         end;
       end;
     'Saradomin brew(1..4)':
-      Self.Points := Floor(BaseStats.GetCurrentLevel(ERSSkill.HitPoints) * 0.15) + 2;
+      Self.Points := Floor(Stats.GetLevel(ERSSkill.HitPoints) * 0.15) + 2;
   end;
 
-  Self.Setup;
+  Self._Setup();
 end;
 
 (*
@@ -240,18 +226,18 @@ begin
 
   case Self.Item of
     'Prayer potion(1..4)':
-      Self.Points := Floor((BaseStats.GetCurrentLevel(ERSSkill.PRAYER) * 0.25) + 7);
+      Self.Points := Floor((Stats.GetLevel(ERSSkill.PRAYER) * 0.25) + 7);
     'Super restore(1..4)':
-      Self.Points := Floor((BaseStats.GetCurrentLevel(ERSSkill.PRAYER) * 0.25) + 8);
+      Self.Points := Floor((Stats.GetLevel(ERSSkill.PRAYER) * 0.25) + 8);
     'Sanfew serum(1..4)':
-      Self.Points := Floor((BaseStats.GetCurrentLevel(ERSSkill.PRAYER) * 0.3) + 4);
+      Self.Points := Floor((Stats.GetLevel(ERSSkill.PRAYER) * 0.3) + 4);
     'Zamorak brew(1..4)':
-      Self.Points := Floor(BaseStats.GetCurrentLevel(ERSSkill.PRAYER) * 0.1);
+      Self.Points := Floor(Stats.GetLevel(ERSSkill.PRAYER) * 0.1);
     'Jangerberries':
       Self.Points := 1;
   end;
 
-  Self.Setup;
+  Self._Setup();
 end;
 
 (*
@@ -306,7 +292,7 @@ begin
       Self.Points := 50;
   end;
 
-  Self.Setup;
+  Self._Setup();
 end;
 
 (*
@@ -338,7 +324,7 @@ begin
       Self.Timer := 90 * ONE_SECOND;
   end;
 
-  Self.Setup;
+  Self._Setup();
 end;
 
 (*
@@ -360,7 +346,7 @@ begin
       Self.Timer := 18 * ONE_SECOND;
   end;
 
-  Self.Setup;
+  Self._Setup();
 end;
 
 (*
@@ -384,7 +370,7 @@ begin
       Self.Timer := 12 * ONE_MINUTE;
   end;
 
-  Self.Setup;
+  Self._Setup();
 end;
 
 (*
@@ -412,7 +398,7 @@ begin
       Self.Timer := 6 * ONE_MINUTE;
   end;
 
-  Self.Setup();
+  Self._Setup();
 end;
 
 (*
@@ -422,12 +408,12 @@ ConsumableArray.Contains()
 
 Wrapper method to check if a TRSConsumableArray has the specified TRSItem in one of it's TRSConsumables.
 *)
-function TRSConsumableArray.Contains(Value: TRSItem): Boolean;
+function TRSConsumableArray.Contains(value: TRSItem): Boolean;
 var
-  C: TRSConsumable;
+  c: TRSConsumable;
 begin
-  for C in Self do
-    if C.Item = Value then
+  for c in Self do
+    if c.Item = value then
       Exit(True);
 end;
 

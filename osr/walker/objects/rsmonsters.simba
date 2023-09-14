@@ -56,7 +56,9 @@ type RSMonsters = record(TSRLBaseRecord) class var
     SmokeDevil,
     Hydra,
     WarpedJelly,
-    Otherworldlybeing: TRSMonster;
+    Otherworldlybeing,
+    SaradominSpiritualRangers,
+    Turoth: TRSMonster;
   end;
 
 procedure RSMonsters.Setup(); static;
@@ -65,7 +67,7 @@ begin
   begin
     with AnyMonster do
     begin
-      Setup(80, 1, [TRSMonster.Walker^.GetMyPos()]);
+      Setup(80, 1, [ScriptWalker^.GetMyPos()]);
       UpText := ['level'];
 
       DotType := ERSMinimapDot.NPC;
@@ -82,7 +84,7 @@ begin
       UpText += 'Big frog';
       UpText += 'Frog';
       Finder.Colors += CTS2(2382856, 12, 0.49, 1.41);
-     end;
+    end;
 
     with Man do
     begin
@@ -323,14 +325,14 @@ begin
 
     with BlueDragon do
     begin
-      Setup(50, 9, [[9190, 5338], [9190, 5388]]);
+      Setup(50, 9, [[9407, 5654], [9397, 5725]]);
       Setup('Blue dragon');
       Finder.Colors += CTS2(7353913, 22, 0.58, 1.27);
     end;
 
     with BlackDragon do
     begin
-      Setup(50, 9, [[9243, 5375]]);
+      Setup(50, 9, [[9472, 5720]]);
       Setup('Black dragon');
       Finder.Colors += CTS2(4080199, 11, 0.91, 0.56);
     end;
@@ -384,8 +386,10 @@ begin
           [3373, 5401], [3424, 5356], [3479, 5407], [3432, 5412]
         ]);
       Setup('Aberrant spectre');
-      UpText += 'Abhorrent spectre';
+      UpText += 'Abhorrent';
+      UpText += 'spectre';
       Finder.Colors += CTS2(3964263, 14, 0.24, 0.89);
+      Finder.Colors += CTS2(4632221, 14, 0.38, 1.32);
     end;
 
     with DeviantSpectre do
@@ -401,6 +405,8 @@ begin
       Setup(35, 5, [[328, 4080], [342, 4145], [533, 3112]]);
       Setup('Dust devil');
       UpText += 'Choke devil';
+      Finder.Colors += CTS2(5721935, 21, 0.09, 0.18);  //superior
+      Finder.Colors += CTS2(10392979, 11, 1.25, 0.24); //superior
       Finder.Colors += CTS2(4230846, 35, 0.09, 0.80);
     end;
 
@@ -511,6 +517,23 @@ begin
       UpText += 'Otherworld being';
       Finder.Colors += CTS2(2702140, 9, 0.11, 0.62);
     end;
+
+    with SaradominSpiritualRangers do
+    begin
+      Setup(45, 6, [[2204, 3722]]);
+      Setup('Spiritual ranger');
+      UpText += ('Spiritual ranger');
+      Finder.Colors += CTS2(2968667, 4, 0.10, 0.54);
+    end;
+
+    with Turoth do
+    begin
+      Setup(45, 5, [[2556, 3142]]);
+      Setup("Turoth");
+      UpText += ("Turoth");
+      Finder.colors += CTS2(8093358, 13, 0.04, 1.14);
+    end;
+
   end;
 end;
 

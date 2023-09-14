@@ -1,0 +1,93 @@
+(*
+XPDrop
+======
+Methods to interact with the XP Drops.
+*)
+
+{$DEFINE WL_XPBAR_INCLUDED}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osr.simba}
+{$ENDIF}
+
+function TRSXPBar.EarnedXP(currentXP: Int32): Boolean;
+begin
+  Result := currentXP > WL.XP.Previous;
+
+  if Result then
+  begin
+    if WL.XP.Previous > 0 then
+      StatsPayload.Update(currentXP-WL.XP.Previous, 0, 0);
+    WL.Activity.Restart();
+    WL.XP.Previous := currentXP;
+  end;
+end;
+
+function TRSXPBar.EarnedXP(): Boolean; overload;
+begin
+  Result := Self.EarnedXP(Self.Read());
+end;
+
+function TRSXPBar.WaitXP(waitTime: Int32 = 600; interval: Int32 = -1): Boolean;
+begin
+  if (interval = -1) then
+    interval := SRL.TruncatedGauss(50, 200);
+
+  Result := WaitUntil(Self.EarnedXP(), interval, waitTime);
+end;
+
+function TRSXPBar.Read(): Int32; override;
+var
+  i: Int32;
+begin
+  if not Self.IsSetup then
+    Self._Setup();
+
+  if not Self.IsSetup or not Self.Enable() then
+    Exit;
+
+  Result := OCR.RecognizeNumber(Self.Bounds(), TOCRColorFilter.Create([$FFFFFF]), Self.Font);
+
+  WL.XP.IsSetup := (Result > 0) and (Result >= WL.XP.Previous);
+
+  if not WL.XP.IsSetup and (WL.XP.Previous = 0) and MainScreen.HasInterface() then
+  begin
+    if MainScreen.CloseInterface() then
+    begin
+      Self.IsSetup := False;
+      Exit(Self.Read());
+    end;
+  end;
+
+  if WL.XP.IsSetup then
+  begin
+    if WL.XP.Start = 0 then
+      WL.XP.Start := Result;
+
+    if WL.XP.Previous = 0 then
+      WL.XP.Previous := Result;
+
+    Exit;
+  end;
+
+  if not WL.GameSettings.XPBarIsSetup and not MainScreen.HasInterface() then
+  begin
+    Mouse.Click(Minimap.GetXPCircle(), MOUSE_LEFT);
+
+    repeat
+      Wait(50, 250, wdLeft);
+      case i of
+        0..7: ;
+        8..10: WriteLn 'Stuck in TRSXPBar.Read()';
+        else TerminateScript('Couldn''t toggle the XPBar.');
+      end;
+      Inc(i);
+    until Self.Enable();
+
+    Result := OCR.RecognizeNumber(Self.Bounds(), TOCRColorFilter.Create([$FFFFFF]), Self.Font);
+    WL.XP.IsSetup := (Result > 0) and (Result >= WL.XP.Previous);
+
+    if not WL.XP.IsSetup then
+      XPBarSetup.Fix();
+  end;
+end;
+

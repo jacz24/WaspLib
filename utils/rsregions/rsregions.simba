@@ -78,7 +78,7 @@ type RSRegions = record(TSRLBaseRecord) class var
     WOODCUTTING_GUILD:          TBox;
     YANILLE:                    TBox;
     ZULANDRA:                   TBox;
-    TEMP_POH:                   TBox;
+    POH:                        TBox;
     TEMPOROSS_COVE:             TBox;
     ZANARIS:                    TBox;
     VARROCK_SEWERS:             TBox;
@@ -91,7 +91,9 @@ type RSRegions = record(TSRLBaseRecord) class var
     TUTORIAL_ISLAND:            TBox;
     DEATH_PLATEAU:              TBox;
     CLAN_HALL:                  TBox;
-    REDWOOD:                   TBox;
+    REDWOOD:                    TBox;
+    GODWARSDUNGEON:             TBox;
+    DARKMEYER:                  TBox;
   end;
 
 begin
@@ -109,7 +111,7 @@ begin
   RSRegions.CATHERBY                   := [6495, 2463, 6910, 2850];
   RSRegions.CHASM_OF_FIRE              := [0, 0, 397, 906];
   RSRegions.CORSAIR_COVE               := [5077, 4605, 5827, 5355];
-  RSRegions.CORSAIR_COVE_DUNGEON       := [8923, 5104, 9500, 5550];
+  RSRegions.CORSAIR_COVE_DUNGEON       := [9184, 5503, 9536, 5787];
   RSRegions.CRAFTING_GUILD             := [6990, 3206, 7261, 3465];
   RSRegions.CRAFTING_GUILD_UPSTAIRS    := [10298, 5442, 10484, 5632];
   RSRegions.DRAYNOR_VILLAGE            := [7596, 3267, 7976, 3660];
@@ -162,14 +164,14 @@ begin
   RSRegions.STRONGHOLD_SLAYER_DUNGEON  := [3066, 5085, 3700, 5650];
   RSRegions.TITHE_FARM                 := [2484, 2303, 2851, 2623];
   RSRegions.MOR_UL_REK                 := [4349, 332, 5201, 1000];
-  RSRegions.VARROCK                    := [7536, 2370, 8710, 3200];
+  RSRegions.VARROCK                    := [7527, 2261, 8710, 3200];
   RSRegions.VARROCK_EAST               := [8235, 2362, 8723, 3119];
   RSRegions.VARROCK_WEST               := [7780, 2300, 8400, 3116];
   RSRegions.WINTERTODT                 := [1750, 270, 2080, 830];
   RSRegions.WOODCUTTING_GUILD          := [1564, 2293, 2110, 2650];
   RSRegions.YANILLE                    := [5509, 3879, 5955, 4200];
   RSRegions.ZULANDRA                   := [3960, 4030, 4500, 4400];
-  RSRegions.TEMP_POH                   := [3494, 0, 3726, 231];
+  RSRegions.POH                        := [3493, 0, 3753, 259];
   RSRegions.TEMPOROSS_COVE             := [7345, 4343, 7744, 4736];
   RSRegions.ZANARIS                    := [9998, 4090, 10081, 4167];
   RSRegions.VARROCK_SEWERS             := [5407, 770, 6052, 1169];
@@ -183,6 +185,8 @@ begin
   RSRegions.DEATH_PLATEAU              := [6667, 1950, 6994, 2237];
   RSRegions.CLAN_HALL                  := [5935, 5508, 6254, 5829];
   RSRegions.REDWOOD                    := [938, 2851, 1127, 3075];
+  RSRegions.GODWARSDUNGEON             := [1849, 3388, 2601, 3957];
+  RSRegions.DARKMEYER                  := [9657, 2791, 10156, 3196];
 
   RSNamedRegionsArray := [
     ['Abyss', RSRegions.ABYSS],
@@ -259,7 +263,7 @@ begin
     ['Woodcutting Guild', RSRegions.WOODCUTTING_GUILD],
     ['Yanille', RSRegions.YANILLE],
     ['Zul-Andra', RSRegions.ZULANDRA],
-    ['Temp POH', RSRegions.TEMP_POH],
+    ['POH', RSRegions.POH],
     ['Tempoross Cove', RSRegions.TEMPOROSS_COVE],
     ['Zanaris', RSRegions.ZANARIS],
     ['Varrock Sewers', RSRegions.VARROCK_SEWERS],
@@ -272,7 +276,9 @@ begin
     ['Tutorial Island', RSRegions.TUTORIAL_ISLAND],
     ['Death Plateau', RSRegions.DEATH_PLATEAU],
     ['Clan Hall', RSRegions.CLAN_HALL],
-    ['Redwood', RSRegions.REDWOOD]
+    ['Redwood', RSRegions.REDWOOD],
+    ['GodWarsDungeon', RSRegions.GODWARSDUNGEON],
+    ['Darkmeyer', RSRegions.DARKMEYER]
   ];
 
   RSBankRegions.Setup();
