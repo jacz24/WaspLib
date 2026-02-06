@@ -1,0 +1,339 @@
+(*
+# ML Bot - Main Entry Point
+Machine-learning driven OSRS bot with autonomous task switching,
+divergent gameplay, and extended unattended operation.
+
+## How It Works
+1. The ML Engine (Q-learning) learns which skills are most rewarding
+   to train based on your current levels, time of day, and fatigue.
+2. The Task Switcher manages transitions between activities, inserting
+   divergent actions (exploring, emoting, checking stats) to appear human.
+3. The Session Manager keeps the bot running autonomously: recovering
+   from errors, scheduling breaks, and persisting state across restarts.
+
+## Usage
+1. Configure enabled skills and goals in the setup form.
+2. Start the script - it handles everything else automatically.
+3. The bot improves over sessions as the Q-table learns.
+
+## Architecture
+```
+  ml_bot.simba (this file)
+     |
+     +-- session_manager.simba  (autonomous operation)
+          |
+          +-- task_switching.simba  (ML-driven decisions)
+               |
+               +-- activities.simba  (skill implementations)
+               +-- ml_engine.simba   (Q-learning core)
+```
+*)
+
+{$I WaspLib/osrs.simba}
+{$I WaspLib/mlbot/session_manager.simba}
+
+type
+  (*
+  ## EMLBotState
+  Top-level states for the ML bot.
+  *)
+  EMLBotState = enum(
+    LOGIN,
+    SETUP_ML,
+    SELECT_ACTIVITY,
+    EXECUTE_ACTIVITY,
+    LEVEL_UP,
+    DIVERGENT_PLAY,
+    HEALTH_CHECK,
+    BREAK_TIME,
+    ERROR_RECOVERY,
+    END_SCRIPT
+  );
+
+  (*
+  ## TMLBotConfig
+  User-facing configuration for the ML bot.
+  *)
+  TMLBotConfig = record
+    // Enabled skills
+    EnableWoodcutting: Boolean;
+    EnableFishing: Boolean;
+    EnableMining: Boolean;
+    EnableCooking: Boolean;
+    EnableFiremaking: Boolean;
+    EnableThieving: Boolean;
+    EnableAgility: Boolean;
+    EnableCombatMelee: Boolean;
+    EnableCombatRanged: Boolean;
+    EnableCombatMagic: Boolean;
+
+    // Session settings
+    MaxRuntime: UInt64;         // 0 = unlimited
+    SafeMode: Boolean;          // Extra conservative behavior
+    DivergentGameplay: Boolean; // Enable human-like diversions
+    ExplorationRate: Single;    // ML exploration rate override (0 = auto)
+
+    // Goal targets (0 = auto-generate)
+    TargetTotalLevel: Integer;
+  end;
+
+  (*
+  ## TMLBot
+  Main bot record tying everything together.
+  *)
+  TMLBot = record
+    Config: TMLBotConfig;
+    BotConfig: TConfigJSON;
+    State: EMLBotState;
+    IsRunning: Boolean;
+  end;
+
+(*
+## TMLBot.GetReportValues
+Returns current values for the progress report display.
+*)
+function TMLBot.GetReportValues(): TStringArray;
+var
+  sessionState, mlStats, currentActivity, nextBreak: String;
+begin
+  sessionState := ToStr(SessionManager.State);
+  mlStats := MLEngine.GetStats();
+
+  if TaskSwitcher.CurrentActivityIdx >= 0 then
+    currentActivity := TaskSwitcher.Activities[TaskSwitcher.CurrentActivityIdx].Name +
+                       ' (' + TaskSwitcher.Activities[TaskSwitcher.CurrentActivityIdx].GetCurrentMethod().Name + ')'
+  else
+    currentActivity := ToStr(TaskSwitcher.CurrentAction);
+
+  nextBreak := FormatMilliseconds(SessionManager.Schedule.GetTimeUntilBreak(), TIME_SHORT);
+
+  Result := [
+    GetTimeStamp(TIME_SHORT),
+    Logger.TimeRunning.ElapsedFmt(TIME_SHORT),
+    Antiban.TimeRunning.ElapsedFmt(TIME_SHORT),
+    sessionState,
+    currentActivity,
+    ToStr(TaskSwitcher.TotalSwitches),
+    ToStr(Round(TaskSwitcher.FatigueLevel * 100)) + '%',
+    mlStats,
+    nextBreak
+  ];
+end;
+
+(*
+## TMLBot.Init
+Sets up all subsystems: logger, antiban, ML engine, session manager.
+*)
+procedure TMLBot.Init();
+var
+  enabledActions: EMLActionSet;
+begin
+  Logger.Setup('ML-Bot');
+  WriteLn GetDebugLn('MLBot', '====================================');
+  WriteLn GetDebugLn('MLBot', '  OSRS ML Bot v' + ML_VERSION);
+  WriteLn GetDebugLn('MLBot', '  Q-Learning | Task Switching');
+  WriteLn GetDebugLn('MLBot', '  Divergent Gameplay | Autonomous');
+  WriteLn GetDebugLn('MLBot', '====================================');
+
+  // Setup progress report
+  ProgressReport.Setup(
+    'ML Bot v' + ML_VERSION,
+    [
+      'Time:', 'Script runtime:', 'Antiban runtime:',
+      'Session state:', 'Current activity:', 'Task switches:',
+      'Fatigue:', 'ML Stats:', 'Next break:'
+    ],
+    @Self.GetReportValues
+  );
+
+  // Configure map (start at Lumbridge)
+  Map.Setup([ERSChunk.LUMBRIDGE]);
+
+  // Configure antiban
+  Antiban.Zoom.Min := 0;
+  Antiban.Zoom.Max := 50;
+  Antiban.Skills := [ERSSkill.TOTAL];
+
+  // Add standard antiban tasks
+  Antiban.AddTask(@Antiban.HoverSkills, 12 * ONE_MINUTE, 0.25);
+  Antiban.AddTask(@Antiban.SmallRandomMouse, 5 * ONE_MINUTE, 0.30);
+  Antiban.AddTask(@Antiban.LargeCameraRotation, 18 * ONE_MINUTE, 0.20);
+  Antiban.AddTask(@Antiban.SmallCameraRotation, 8 * ONE_MINUTE, 0.25);
+
+  // Add breaks
+  Antiban.AddBreak(35 * ONE_MINUTE, 4 * ONE_MINUTE, 0.25, 0.30);
+  Antiban.AddBreak(90 * ONE_MINUTE, 12 * ONE_MINUTE, 0.20, 0.50);
+
+  // Add sleep schedule (overnight break)
+  Antiban.AddSleep('02:00:00', 7 * ONE_HOUR, 0.15, 0.90);
+
+  // Setup session manager
+  SessionManager.Setup(Self.Config.MaxRuntime, Self.Config.SafeMode);
+
+  Self.IsRunning := True;
+  WriteLn GetDebugLn('MLBot', 'Initialization complete. Starting autonomous session...');
+end;
+
+(*
+## TMLBot.Run
+Main entry point. Starts the autonomous ML-driven bot loop.
+*)
+procedure TMLBot.Run();
+begin
+  Self.Init();
+
+  // The session manager handles the main loop
+  SessionManager.RunMainLoop();
+
+  // Cleanup
+  MLEngine.Save();
+  SessionManager.SaveSession();
+
+  WriteLn GetDebugLn('MLBot', 'Thank you for using ML Bot v' + ML_VERSION);
+  WriteLn GetDebugLn('MLBot', 'Final ML Stats: ' + MLEngine.GetStats());
+end;
+
+var
+  MLBot: TMLBot;
+  MLBotForm: TScriptForm;
+  MLBotConfig: TConfigJSON;
+
+  // Form checkboxes for skill toggles
+  ChkWoodcutting, ChkFishing, ChkMining, ChkCooking: TLazCheckBox;
+  ChkFiremaking, ChkThieving, ChkAgility: TLazCheckBox;
+  ChkCombatMelee, ChkCombatRanged, ChkCombatMagic: TLazCheckBox;
+  ChkDivergent, ChkSafeMode: TLazCheckBox;
+
+(*
+## Form.OnStart
+Callback when the user clicks Start in the configuration form.
+Reads all form settings into the bot config.
+*)
+procedure TScriptForm.OnStart(sender: TLazObject); override;
+begin
+  inherited;
+
+  MLBot.Config.EnableWoodcutting  := ChkWoodcutting.IsChecked();
+  MLBot.Config.EnableFishing      := ChkFishing.IsChecked();
+  MLBot.Config.EnableMining       := ChkMining.IsChecked();
+  MLBot.Config.EnableCooking      := ChkCooking.IsChecked();
+  MLBot.Config.EnableFiremaking   := ChkFiremaking.IsChecked();
+  MLBot.Config.EnableThieving     := ChkThieving.IsChecked();
+  MLBot.Config.EnableAgility      := ChkAgility.IsChecked();
+  MLBot.Config.EnableCombatMelee  := ChkCombatMelee.IsChecked();
+  MLBot.Config.EnableCombatRanged := ChkCombatRanged.IsChecked();
+  MLBot.Config.EnableCombatMagic  := ChkCombatMagic.IsChecked();
+  MLBot.Config.DivergentGameplay  := ChkDivergent.IsChecked();
+  MLBot.Config.SafeMode           := ChkSafeMode.IsChecked();
+
+  MLBot.Config.MaxRuntime := Self.Goals.Time.Value * ONE_MINUTE;
+
+  // Save config
+  if MLBotConfig.Data.Has('enable_wc') then
+    MLBotConfig.Data.Item['enable_wc'].AsBool := MLBot.Config.EnableWoodcutting
+  else
+    MLBotConfig.Data.AddBool('enable_wc', MLBot.Config.EnableWoodcutting);
+
+  if MLBotConfig.Data.Has('enable_fishing') then
+    MLBotConfig.Data.Item['enable_fishing'].AsBool := MLBot.Config.EnableFishing
+  else
+    MLBotConfig.Data.AddBool('enable_fishing', MLBot.Config.EnableFishing);
+
+  if MLBotConfig.Data.Has('divergent') then
+    MLBotConfig.Data.Item['divergent'].AsBool := MLBot.Config.DivergentGameplay
+  else
+    MLBotConfig.Data.AddBool('divergent', MLBot.Config.DivergentGameplay);
+
+  if MLBotConfig.Data.Has('safe_mode') then
+    MLBotConfig.Data.Item['safe_mode'].AsBool := MLBot.Config.SafeMode
+  else
+    MLBotConfig.Data.AddBool('safe_mode', MLBot.Config.SafeMode);
+
+  MLBotConfig.Save();
+end;
+
+(*
+## Form.Init
+Creates the configuration GUI form with skill toggles and settings.
+*)
+procedure TScriptForm.Init();
+var
+  tab: TLazTabSheet;
+  panel: TLazPanel;
+  y: Integer;
+begin
+  MLBotConfig.Setup('scripts' + PATH_SEP + 'ml-bot');
+
+  Self.Setup('OSRS ML Bot v' + ML_VERSION, MLBotConfig.Data);
+
+  // Skills tab
+  tab := Self.CreateTab('Skills');
+  y := 10;
+
+  ChkWoodcutting := TLazCheckBox.CreateEx(tab, 'Woodcutting',  'Train woodcutting', 20, y);
+  ChkFishing     := TLazCheckBox.CreateEx(tab, 'Fishing',      'Train fishing',     20, y + 25);
+  ChkMining      := TLazCheckBox.CreateEx(tab, 'Mining',       'Train mining',      20, y + 50);
+  ChkCooking     := TLazCheckBox.CreateEx(tab, 'Cooking',      'Train cooking',     20, y + 75);
+  ChkFiremaking  := TLazCheckBox.CreateEx(tab, 'Firemaking',   'Train firemaking',  20, y + 100);
+  ChkThieving    := TLazCheckBox.CreateEx(tab, 'Thieving',     'Train thieving',    20, y + 125);
+  ChkAgility     := TLazCheckBox.CreateEx(tab, 'Agility',      'Train agility',     20, y + 150);
+
+  ChkCombatMelee  := TLazCheckBox.CreateEx(tab, 'Melee Combat',  'Train attack/strength/defence', 200, y);
+  ChkCombatRanged := TLazCheckBox.CreateEx(tab, 'Ranged Combat', 'Train ranged',                  200, y + 25);
+  ChkCombatMagic  := TLazCheckBox.CreateEx(tab, 'Magic Combat',  'Train magic in combat',         200, y + 50);
+
+  // Load saved settings
+  if MLBotConfig.Data.Has('enable_wc') then
+    ChkWoodcutting.SetChecked(MLBotConfig.Data.Item['enable_wc'].AsBool)
+  else
+    ChkWoodcutting.SetChecked(True);
+
+  if MLBotConfig.Data.Has('enable_fishing') then
+    ChkFishing.SetChecked(MLBotConfig.Data.Item['enable_fishing'].AsBool)
+  else
+    ChkFishing.SetChecked(True);
+
+  // Default all to checked
+  ChkMining.SetChecked(True);
+  ChkCooking.SetChecked(True);
+  ChkFiremaking.SetChecked(True);
+  ChkThieving.SetChecked(True);
+  ChkAgility.SetChecked(True);
+  ChkCombatMelee.SetChecked(True);
+  ChkCombatRanged.SetChecked(True);
+  ChkCombatMagic.SetChecked(True);
+
+  // Settings tab
+  tab := Self.CreateTab('ML Settings');
+  ChkDivergent := TLazCheckBox.CreateEx(tab, 'Divergent Gameplay',
+    'Enable human-like behavior diversions (exploring, emoting, etc.)', 20, 10);
+  ChkSafeMode := TLazCheckBox.CreateEx(tab, 'Safe Mode',
+    'Extra conservative - more breaks, slower pace, more antiban', 20, 40);
+
+  if MLBotConfig.Data.Has('divergent') then
+    ChkDivergent.SetChecked(MLBotConfig.Data.Item['divergent'].AsBool)
+  else
+    ChkDivergent.SetChecked(True);
+
+  if MLBotConfig.Data.Has('safe_mode') then
+    ChkSafeMode.SetChecked(MLBotConfig.Data.Item['safe_mode'].AsBool)
+  else
+    ChkSafeMode.SetChecked(False);
+
+  // Goals panel
+  panel := Self.CreateGoals(tab, False, True, False, EOrientation.HORIZONTAL);
+  panel.Align := ELazAlign.Bottom;
+
+  // Antiban tab
+  Self.CreateAntibanTab();
+
+  Self.Run();
+end;
+
+(*
+## Main script entry point
+*)
+begin
+  MLBotForm.Init();
+  MLBot.Run();
+end.

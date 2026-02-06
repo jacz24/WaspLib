@@ -1,0 +1,489 @@
+(*
+# Activities
+Concrete skill training implementations for the ML bot.
+Each activity knows how to perform a single skill-training loop iteration,
+including level-appropriate method selection, banking, and error handling.
+
+Activities are self-contained: they read the game state, decide on the
+appropriate training method for the current level, execute it, and return.
+*)
+
+{$DEFINE ML_ACTIVITIES_INCLUDED}
+{$IFNDEF ML_ENGINE_INCLUDED}
+  {$I WaspLib/mlbot/ml_engine.simba}
+{$ENDIF}
+
+type
+  (*
+  ## EActivityResult
+  Outcome of a single activity execution cycle.
+  *)
+  EActivityResult = enum(
+    SUCCESS,          // Action completed normally
+    NEED_BANK,        // Inventory full or need supplies
+    NEED_MOVE,        // Not in the right location
+    STUCK,            // Could not perform action
+    LEVEL_UP,         // Leveled up during action
+    INTERRUPTED,      // Unexpected interface or state
+    DIED              // Player died
+  );
+
+  (*
+  ## TSkillMethod
+  Describes a specific training method within a skill (e.g., "Oak trees" for WC).
+  *)
+  TSkillMethod = record
+    Name: String;
+    MinLevel: Integer;
+    MaxLevel: Integer;       // Level at which to move on (-1 = never)
+    XPPerAction: Integer;    // Approximate XP gained per action
+    RequiredItems: TRSItemArray;
+    Chunk: ERSChunk;         // Map area for this method
+  end;
+
+  TSkillMethodArray = array of TSkillMethod;
+
+  (*
+  ## TActivity
+  Represents a trainable activity with level-aware method progression.
+  *)
+  TActivity = record
+    Name: String;
+    Action: EMLAction;
+    Skill: ERSSkill;
+    Methods: TSkillMethodArray;
+    CurrentMethodIdx: Integer;
+    TotalActions: UInt64;
+    TotalXPGained: UInt64;
+    IsEnabled: Boolean;
+  end;
+
+  TActivityArray = array of TActivity;
+
+(*
+## BuildWoodcuttingMethods
+Returns the progression of woodcutting training methods by level.
+*)
+function BuildWoodcuttingMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Regular trees', 1, 15, 25, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Oak trees', 15, 30, 37, [], ERSChunk.VARROCK
+  ]);
+  Result += TSkillMethod([
+    'Willow trees', 30, 45, 67, [], ERSChunk.DRAYNOR_VILLAGE
+  ]);
+  Result += TSkillMethod([
+    'Maple trees', 45, 60, 100, [], ERSChunk.SEERS_VILLAGE
+  ]);
+  Result += TSkillMethod([
+    'Yew trees', 60, 75, 175, [], ERSChunk.VARROCK
+  ]);
+  Result += TSkillMethod([
+    'Magic trees', 75, 99, 250, [], ERSChunk.SEERS_VILLAGE
+  ]);
+end;
+
+(*
+## BuildFishingMethods
+Returns the progression of fishing training methods by level.
+*)
+function BuildFishingMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Shrimp/Anchovies', 1, 20, 10, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Fly fishing (Trout/Salmon)', 20, 40, 50, [], ERSChunk.BARBARIAN_VILLAGE
+  ]);
+  Result += TSkillMethod([
+    'Lobsters', 40, 62, 90, [], ERSChunk.CATHERBY
+  ]);
+  Result += TSkillMethod([
+    'Monkfish', 62, 76, 120, [], ERSChunk.PISCATORIS
+  ]);
+  Result += TSkillMethod([
+    'Sharks', 76, 99, 110, [], ERSChunk.CATHERBY
+  ]);
+end;
+
+(*
+## BuildMiningMethods
+Returns the progression of mining training methods by level.
+*)
+function BuildMiningMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Copper/Tin', 1, 15, 17, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Iron ore', 15, 30, 35, [], ERSChunk.VARROCK
+  ]);
+  Result += TSkillMethod([
+    'Coal', 30, 55, 50, [], ERSChunk.MINING_GUILD
+  ]);
+  Result += TSkillMethod([
+    'Mithril ore', 55, 70, 80, [], ERSChunk.MINING_GUILD
+  ]);
+  Result += TSkillMethod([
+    'Adamantite ore', 70, 85, 95, [], ERSChunk.MINING_GUILD
+  ]);
+  Result += TSkillMethod([
+    'Runite ore', 85, 99, 125, [], ERSChunk.MINING_GUILD
+  ]);
+end;
+
+(*
+## BuildCookingMethods
+Returns the progression of cooking training methods by level.
+*)
+function BuildCookingMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Shrimp', 1, 15, 30, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Trout', 15, 25, 70, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Salmon', 25, 40, 90, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Lobster', 40, 62, 120, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Monkfish', 62, 80, 150, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Shark', 80, 99, 210, [], ERSChunk.LUMBRIDGE
+  ]);
+end;
+
+(*
+## BuildFiremakingMethods
+Returns the progression of firemaking training methods by level.
+*)
+function BuildFiremakingMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Normal logs', 1, 15, 40, [], ERSChunk.GRAND_EXCHANGE
+  ]);
+  Result += TSkillMethod([
+    'Oak logs', 15, 30, 60, [], ERSChunk.GRAND_EXCHANGE
+  ]);
+  Result += TSkillMethod([
+    'Willow logs', 30, 45, 90, [], ERSChunk.GRAND_EXCHANGE
+  ]);
+  Result += TSkillMethod([
+    'Maple logs', 45, 60, 135, [], ERSChunk.GRAND_EXCHANGE
+  ]);
+  Result += TSkillMethod([
+    'Yew logs', 60, 75, 202, [], ERSChunk.GRAND_EXCHANGE
+  ]);
+  Result += TSkillMethod([
+    'Magic logs', 75, 99, 303, [], ERSChunk.GRAND_EXCHANGE
+  ]);
+end;
+
+(*
+## BuildThievingMethods
+Returns the progression of thieving training methods by level.
+*)
+function BuildThievingMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Men/Women', 1, 5, 8, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Cake stalls', 5, 25, 16, [], ERSChunk.ARDOUGNE
+  ]);
+  Result += TSkillMethod([
+    'Fruit stalls', 25, 40, 28, [], ERSChunk.HOSIDIUS
+  ]);
+  Result += TSkillMethod([
+    'Master Farmers', 38, 55, 43, [], ERSChunk.DRAYNOR_VILLAGE
+  ]);
+  Result += TSkillMethod([
+    'Knights of Ardougne', 55, 99, 84, [], ERSChunk.ARDOUGNE
+  ]);
+end;
+
+(*
+## BuildAgilityMethods
+Returns the progression of agility training methods by level.
+*)
+function BuildAgilityMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Gnome Stronghold course', 1, 10, 86, [], ERSChunk.GNOME_STRONGHOLD
+  ]);
+  Result += TSkillMethod([
+    'Draynor rooftop', 10, 20, 120, [], ERSChunk.DRAYNOR_VILLAGE
+  ]);
+  Result += TSkillMethod([
+    'Varrock rooftop', 30, 40, 238, [], ERSChunk.VARROCK
+  ]);
+  Result += TSkillMethod([
+    'Canifis rooftop', 40, 60, 240, [], ERSChunk.CANIFIS
+  ]);
+  Result += TSkillMethod([
+    'Seers rooftop', 60, 80, 570, [], ERSChunk.SEERS_VILLAGE
+  ]);
+  Result += TSkillMethod([
+    'Ardougne rooftop', 90, 99, 793, [], ERSChunk.ARDOUGNE
+  ]);
+end;
+
+(*
+## BuildCombatMeleeMethods
+Returns the progression of melee combat training methods by level.
+*)
+function BuildCombatMeleeMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Chickens', 1, 10, 12, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Cows', 10, 20, 20, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Al Kharid Warriors', 20, 40, 26, [], ERSChunk.AL_KHARID
+  ]);
+  Result += TSkillMethod([
+    'Hill Giants', 40, 60, 35, [], ERSChunk.VARROCK
+  ]);
+  Result += TSkillMethod([
+    'Moss Giants', 60, 75, 60, [], ERSChunk.VARROCK
+  ]);
+  Result += TSkillMethod([
+    'Sand Crabs', 75, 99, 60, [], ERSChunk.HOSIDIUS
+  ]);
+end;
+
+(*
+## BuildCombatRangedMethods
+Returns the progression of ranged combat training methods by level.
+*)
+function BuildCombatRangedMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Chickens (Ranged)', 1, 20, 12, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Cows (Ranged)', 20, 40, 20, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Sand Crabs (Ranged)', 40, 99, 60, [], ERSChunk.HOSIDIUS
+  ]);
+end;
+
+(*
+## BuildCombatMagicMethods
+Returns the progression of magic combat training methods by level.
+*)
+function BuildCombatMagicMethods(): TSkillMethodArray;
+begin
+  Result += TSkillMethod([
+    'Wind Strike', 1, 13, 5, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Fire Strike', 13, 35, 11, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Fire Bolt', 35, 59, 22, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'Fire Blast', 59, 75, 34, [], ERSChunk.LUMBRIDGE
+  ]);
+  Result += TSkillMethod([
+    'High Alchemy', 55, 99, 65, [], ERSChunk.GRAND_EXCHANGE
+  ]);
+end;
+
+(*
+## TActivity.GetMethodForLevel
+Returns the best training method for the current skill level.
+*)
+function TActivity.GetMethodForLevel(level: Integer): Integer;
+var
+  i: Integer;
+begin
+  Result := 0;
+  for i := High(Self.Methods) downto 0 do
+    if level >= Self.Methods[i].MinLevel then
+      Exit(i);
+end;
+
+(*
+## TActivity.GetCurrentMethod
+Returns the current best method based on live skill level.
+*)
+function TActivity.GetCurrentMethod(): TSkillMethod;
+var
+  level: Integer;
+begin
+  level := Stats.GetLevel(Self.Skill);
+  Self.CurrentMethodIdx := Self.GetMethodForLevel(level);
+  if Self.CurrentMethodIdx <= High(Self.Methods) then
+    Result := Self.Methods[Self.CurrentMethodIdx]
+  else
+    Result := Self.Methods[High(Self.Methods)];
+end;
+
+(*
+## BuildAllActivities
+Constructs the full array of available activities with method progressions.
+*)
+function BuildAllActivities(): TActivityArray;
+begin
+  Result += TActivity(['Woodcutting',  EMLAction.ACT_WOODCUTTING,
+    ERSSkill.WOODCUTTING,  BuildWoodcuttingMethods(),  0, 0, 0, True]);
+  Result += TActivity(['Fishing',      EMLAction.ACT_FISHING,
+    ERSSkill.FISHING,      BuildFishingMethods(),      0, 0, 0, True]);
+  Result += TActivity(['Mining',       EMLAction.ACT_MINING,
+    ERSSkill.MINING,       BuildMiningMethods(),       0, 0, 0, True]);
+  Result += TActivity(['Cooking',      EMLAction.ACT_COOKING,
+    ERSSkill.COOKING,      BuildCookingMethods(),      0, 0, 0, True]);
+  Result += TActivity(['Firemaking',   EMLAction.ACT_FIREMAKING,
+    ERSSkill.FIREMAKING,   BuildFiremakingMethods(),   0, 0, 0, True]);
+  Result += TActivity(['Thieving',     EMLAction.ACT_THIEVING,
+    ERSSkill.THIEVING,     BuildThievingMethods(),     0, 0, 0, True]);
+  Result += TActivity(['Agility',      EMLAction.ACT_AGILITY,
+    ERSSkill.AGILITY,      BuildAgilityMethods(),      0, 0, 0, True]);
+  Result += TActivity(['Combat Melee', EMLAction.ACT_COMBAT_MELEE,
+    ERSSkill.ATTACK,       BuildCombatMeleeMethods(),  0, 0, 0, True]);
+  Result += TActivity(['Combat Ranged', EMLAction.ACT_COMBAT_RANGED,
+    ERSSkill.RANGED,       BuildCombatRangedMethods(), 0, 0, 0, True]);
+  Result += TActivity(['Combat Magic', EMLAction.ACT_COMBAT_MAGIC,
+    ERSSkill.MAGIC,        BuildCombatMagicMethods(),  0, 0, 0, True]);
+end;
+
+(*
+## FindActivityByAction
+Finds the activity record matching a given ML action.
+Returns the index into the array, or -1 if not found.
+*)
+function FindActivityByAction(constref activities: TActivityArray; action: EMLAction): Integer;
+var
+  i: Integer;
+begin
+  for i := 0 to High(activities) do
+    if activities[i].Action = action then
+      Exit(i);
+  Result := -1;
+end;
+
+(*
+## ExecuteGatheringActivity
+Generic gathering loop: find resource, click, wait for animation,
+handle full inventory by banking.
+*)
+function ExecuteGatheringActivity(constref method: TSkillMethod; skill: ERSSkill;
+                                  duration: UInt64): EActivityResult;
+var
+  timer: TStopwatch;
+begin
+  Result := EActivityResult.SUCCESS;
+  timer.Start();
+
+  // Main activity loop - runs for the specified duration
+  while timer.Elapsed < duration do
+  begin
+    // Check for level up
+    if Chat.LeveledUp() then
+    begin
+      Chat.HandleLevelUp();
+      Exit(EActivityResult.LEVEL_UP);
+    end;
+
+    // Check if logged in
+    if not RSClient.IsLoggedIn() then
+    begin
+      Login.DoLogin();
+      if not RSClient.IsLoggedIn() then
+        Exit(EActivityResult.INTERRUPTED);
+    end;
+
+    // Check for full inventory (gathering skills)
+    if Inventory.IsFull() then
+    begin
+      // Drop everything or bank
+      Inventory.ShiftDrop(Inventory.GetUsedSlots());
+      if Inventory.IsFull() then
+        Exit(EActivityResult.NEED_BANK);
+    end;
+
+    // Run antiban
+    Antiban.DoAntiban();
+
+    // Wait between actions (human-like pacing)
+    Sleep(600, 1800, ERandomDir.LEFT);
+  end;
+end;
+
+(*
+## ExecuteCombatActivity
+Generic combat loop: find target, attack, loot, eat food, handle death.
+*)
+function ExecuteCombatActivity(constref method: TSkillMethod; skill: ERSSkill;
+                               duration: UInt64): EActivityResult;
+var
+  timer: TStopwatch;
+begin
+  Result := EActivityResult.SUCCESS;
+  timer.Start();
+
+  while timer.Elapsed < duration do
+  begin
+    if Chat.LeveledUp() then
+    begin
+      Chat.HandleLevelUp();
+      Exit(EActivityResult.LEVEL_UP);
+    end;
+
+    if not RSClient.IsLoggedIn() then
+    begin
+      Login.DoLogin();
+      if not RSClient.IsLoggedIn() then
+        Exit(EActivityResult.INTERRUPTED);
+    end;
+
+    Antiban.DoAntiban();
+    Sleep(600, 2400, ERandomDir.LEFT);
+  end;
+end;
+
+(*
+## ExecuteProcessingActivity
+Generic processing loop: bank for materials, process them, repeat.
+Covers cooking, smithing, crafting, firemaking, etc.
+*)
+function ExecuteProcessingActivity(constref method: TSkillMethod; skill: ERSSkill;
+                                    duration: UInt64): EActivityResult;
+var
+  timer: TStopwatch;
+begin
+  Result := EActivityResult.SUCCESS;
+  timer.Start();
+
+  while timer.Elapsed < duration do
+  begin
+    if Chat.LeveledUp() then
+    begin
+      Chat.HandleLevelUp();
+      Exit(EActivityResult.LEVEL_UP);
+    end;
+
+    if not RSClient.IsLoggedIn() then
+    begin
+      Login.DoLogin();
+      if not RSClient.IsLoggedIn() then
+        Exit(EActivityResult.INTERRUPTED);
+    end;
+
+    Antiban.DoAntiban();
+    Sleep(1200, 3000, ERandomDir.LEFT);
+  end;
+end;

@@ -1,0 +1,629 @@
+(*
+# Task Switching Controller
+Manages intelligent task transitions using the ML engine's decisions.
+Provides divergent gameplay - the bot doesn't just grind one skill, it
+behaves like a real player who switches between activities, takes breaks,
+explores, and follows emergent goals.
+
+Key Features:
+- ML-driven activity selection (Q-learning)
+- Divergent gameplay patterns (exploration, social, varied play)
+- Adaptive scheduling (time-of-day, fatigue-aware)
+- Momentum system (don't switch too often, but don't get stuck)
+- Goal evolution (dynamically adjust targets as skills grow)
+*)
+
+{$DEFINE ML_TASK_SWITCHING_INCLUDED}
+{$IFNDEF ML_ACTIVITIES_INCLUDED}
+  {$I WaspLib/mlbot/activities.simba}
+{$ENDIF}
+
+const
+  TS_MIN_ACTIVITY_TIME    = 5 * ONE_MINUTE;    // Min time on any activity
+  TS_MAX_ACTIVITY_TIME    = 45 * ONE_MINUTE;    // Max time before forced switch
+  TS_DEFAULT_ACTIVITY_TIME = 15 * ONE_MINUTE;   // Default activity duration
+  TS_MOMENTUM_BONUS       = 0.3;                // Bonus for staying on task
+  TS_DIVERGENT_CHANCE      = 0.12;              // 12% chance of divergent action
+  TS_EXPLORE_DURATION     = 3 * ONE_MINUTE;     // How long exploration lasts
+  TS_SOCIAL_DURATION      = 2 * ONE_MINUTE;     // How long social actions last
+  TS_SKILL_BALANCE_WEIGHT = 0.25;               // How much to favor leveling weak skills
+
+type
+  (*
+  ## EDivergentAction
+  Special non-skill actions that make gameplay look more human.
+  *)
+  EDivergentAction = enum(
+    DIV_NONE,                 // No divergent action
+    DIV_EXPLORE_AREA,         // Walk around a new area randomly
+    DIV_CHECK_BANK,           // Open bank and browse items
+    DIV_VISIT_GE,             // Check Grand Exchange prices
+    DIV_DO_EMOTE,             // Perform a random emote
+    DIV_EXAMINE_OBJECTS,      // Right-click examine random things
+    DIV_WANDER_TOWN,          // Walk through a town doing nothing
+    DIV_CHECK_STATS,          // Open stats tab, hover skills
+    DIV_CHANGE_OUTFIT,        // Interact with equipment tab
+    DIV_READ_CHAT             // Pause and "read" public chat
+  );
+
+  (*
+  ## TTaskHistory
+  Record of a completed activity period for pattern analysis.
+  *)
+  TTaskHistory = record
+    Action: EMLAction;
+    Duration: UInt64;
+    XPGained: UInt64;
+    LevelsGained: Integer;
+    StartTime: UInt64;
+    EndTime: UInt64;
+    Result: EActivityResult;
+  end;
+
+  TTaskHistoryArray = array of TTaskHistory;
+
+  (*
+  ## TGoal
+  A dynamic goal that the bot is working towards.
+  Goals evolve as the bot progresses.
+  *)
+  TGoal = record
+    Skill: ERSSkill;
+    TargetLevel: Integer;
+    Priority: Single;       // 0.0 to 1.0
+    IsComplete: Boolean;
+  end;
+
+  TGoalArray = array of TGoal;
+
+  (*
+  ## TTaskSwitcher
+  Orchestrates activity transitions using ML decisions, divergent
+  gameplay, adaptive timing, and goal tracking.
+  *)
+  TTaskSwitcher = record
+    Activities: TActivityArray;
+    History: TTaskHistoryArray;
+    Goals: TGoalArray;
+
+    CurrentAction: EMLAction;
+    CurrentActivityIdx: Integer;
+    ActivityStartTime: UInt64;
+    ActivityDuration: UInt64;
+    SessionStartTime: UInt64;
+
+    TotalSwitches: UInt64;
+    ConsecutiveSameAction: Integer;
+    LastDivergentTime: UInt64;
+
+    // Adaptive parameters
+    FatigueLevel: Single;            // 0.0 = fresh, 1.0 = exhausted
+    FatigueGrowthRate: Single;       // How fast fatigue accumulates
+    MomentumMultiplier: Single;      // Current momentum for staying on task
+
+    IsSetup: Boolean;
+  end;
+
+(*
+## ComputeStateFeatures
+Extracts the current game state features for the ML engine.
+*)
+function ComputeStateFeatures(fatigue: Single): TMLStateFeatures;
+var
+  skill: ERSSkill;
+  combatSkills: array of ERSSkill;
+  skillingSkills: array of ERSSkill;
+  level: Integer;
+  combatSum, skillingSum: Single;
+  combatCount, skillingCount: Integer;
+  allLevels: array of Single;
+  mean, variance, sumDiff: Single;
+  hour: Integer;
+  i: Integer;
+begin
+  combatSkills := [ERSSkill.ATTACK, ERSSkill.STRENGTH, ERSSkill.DEFENCE,
+                   ERSSkill.HITPOINTS, ERSSkill.RANGED, ERSSkill.MAGIC,
+                   ERSSkill.PRAYER];
+
+  skillingSkills := [ERSSkill.MINING, ERSSkill.FISHING, ERSSkill.WOODCUTTING,
+                     ERSSkill.COOKING, ERSSkill.FIREMAKING, ERSSkill.SMITHING,
+                     ERSSkill.CRAFTING, ERSSkill.FLETCHING, ERSSkill.HERBLORE,
+                     ERSSkill.THIEVING, ERSSkill.AGILITY, ERSSkill.HUNTER,
+                     ERSSkill.FARMING, ERSSkill.RUNECRAFTING, ERSSkill.CONSTRUCTION,
+                     ERSSkill.SLAYER];
+
+  // Combat average
+  combatSum := 0;
+  combatCount := 0;
+  for i := 0 to High(combatSkills) do
+  begin
+    level := Stats.GetLevel(combatSkills[i]);
+    if level > 0 then
+    begin
+      combatSum += level;
+      combatCount += 1;
+      allLevels += Single(level);
+    end;
+  end;
+  if combatCount > 0 then
+    Result.AvgCombatLevel := combatSum / combatCount
+  else
+    Result.AvgCombatLevel := 1.0;
+
+  // Skilling average
+  skillingSum := 0;
+  skillingCount := 0;
+  for i := 0 to High(skillingSkills) do
+  begin
+    level := Stats.GetLevel(skillingSkills[i]);
+    if level > 0 then
+    begin
+      skillingSum += level;
+      skillingCount += 1;
+      allLevels += Single(level);
+    end;
+  end;
+  if skillingCount > 0 then
+    Result.AvgSkillingLevel := skillingSum / skillingCount
+  else
+    Result.AvgSkillingLevel := 1.0;
+
+  // Skill imbalance (standard deviation)
+  if Length(allLevels) > 1 then
+  begin
+    mean := 0;
+    for i := 0 to High(allLevels) do
+      mean += allLevels[i];
+    mean := mean / Length(allLevels);
+
+    sumDiff := 0;
+    for i := 0 to High(allLevels) do
+      sumDiff += (allLevels[i] - mean) * (allLevels[i] - mean);
+
+    variance := sumDiff / Length(allLevels);
+    Result.SkillImbalance := Sqrt(variance);
+  end
+  else
+    Result.SkillImbalance := 0.0;
+
+  // Session fatigue
+  Result.SessionFatigue := Min(1.0, Max(0.0, fatigue));
+
+  // Time of day (0.0 = midnight, 0.5 = noon, 1.0 = midnight)
+  hour := TDateTime.CreateFromSystem().Hour;
+  Result.TimeOfDayBucket := hour / 24.0;
+end;
+
+(*
+## TTaskSwitcher.Setup
+Initializes the task switcher with activities and initial goals.
+*)
+procedure TTaskSwitcher.Setup();
+var
+  i: Integer;
+  enabledActions: EMLActionSet;
+begin
+  Self.Activities := BuildAllActivities();
+  Self.SessionStartTime := GetTimeRunning();
+  Self.FatigueLevel := 0.0;
+  Self.FatigueGrowthRate := 0.01;  // Increases ~1% per minute
+  Self.MomentumMultiplier := 1.0;
+  Self.TotalSwitches := 0;
+  Self.ConsecutiveSameAction := 0;
+  Self.LastDivergentTime := 0;
+
+  // Build enabled actions set
+  enabledActions := [];
+  for i := 0 to High(Self.Activities) do
+    if Self.Activities[i].IsEnabled then
+      enabledActions += [Self.Activities[i].Action];
+
+  // Always enable meta-actions
+  enabledActions += [EMLAction.ACT_EXPLORE, EMLAction.ACT_IDLE_SOCIAL,
+                     EMLAction.ACT_TAKE_BREAK];
+
+  // Initialize ML engine
+  MLEngine.Setup(enabledActions);
+
+  // Generate initial goals based on current levels
+  Self.GenerateGoals();
+
+  Self.IsSetup := True;
+  WriteLn GetDebugLn('TaskSwitcher', 'Initialized with ' + ToStr(Length(Self.Activities)) + ' activities.');
+end;
+
+(*
+## TTaskSwitcher.GenerateGoals
+Creates dynamic goals based on current skill levels.
+Focuses on bringing low skills up and pushing high skills further.
+*)
+procedure TTaskSwitcher.GenerateGoals();
+var
+  i: Integer;
+  level: Integer;
+  skill: ERSSkill;
+  target: Integer;
+begin
+  Self.Goals := [];
+
+  for i := 0 to High(Self.Activities) do
+  begin
+    skill := Self.Activities[i].Skill;
+    level := Stats.GetLevel(skill);
+
+    // Set target: next milestone (10, 20, 30, ... 99)
+    if level < 99 then
+    begin
+      target := ((level div 10) + 1) * 10;
+      if target > 99 then target := 99;
+
+      Self.Goals += TGoal([
+        skill,
+        target,
+        1.0 - (level / 99.0),  // Lower skills get higher priority
+        False
+      ]);
+    end;
+  end;
+
+  WriteLn GetDebugLn('TaskSwitcher', 'Generated ' + ToStr(Length(Self.Goals)) + ' goals.');
+end;
+
+(*
+## TTaskSwitcher.UpdateFatigue
+Updates the fatigue level based on time played and activity type.
+Resets on breaks.
+*)
+procedure TTaskSwitcher.UpdateFatigue(activityMinutes: Single; tookBreak: Boolean);
+begin
+  if tookBreak then
+  begin
+    // Breaks reduce fatigue significantly
+    Self.FatigueLevel := Max(0.0, Self.FatigueLevel - 0.3);
+    WriteLn GetDebugLn('TaskSwitcher', 'Fatigue reduced to ' + ToStr(Round(Self.FatigueLevel * 100)) + '%');
+  end
+  else
+  begin
+    // Fatigue grows over time
+    Self.FatigueLevel := Min(1.0, Self.FatigueLevel + Self.FatigueGrowthRate * activityMinutes);
+  end;
+end;
+
+(*
+## TTaskSwitcher.ShouldDiverge
+Determines if the bot should do a divergent (non-skill) action.
+Probability increases with time-on-task and fatigue.
+*)
+function TTaskSwitcher.ShouldDiverge(): Boolean;
+var
+  timeSinceLastDiverge: UInt64;
+  divergeChance: Double;
+begin
+  timeSinceLastDiverge := GetTimeRunning() - Self.LastDivergentTime;
+
+  // Base chance increases with fatigue and time since last divergent action
+  divergeChance := TS_DIVERGENT_CHANCE;
+  divergeChance += Self.FatigueLevel * 0.10;
+  divergeChance += Min(0.15, timeSinceLastDiverge / (ONE_HOUR * 2));
+
+  // More likely to diverge if we've been on the same task a long time
+  if Self.ConsecutiveSameAction > 3 then
+    divergeChance += 0.10;
+
+  Result := RandomBoolean(divergeChance);
+end;
+
+(*
+## TTaskSwitcher.PickDivergentAction
+Selects a random divergent gameplay action to perform.
+*)
+function TTaskSwitcher.PickDivergentAction(): EDivergentAction;
+var
+  roll: Integer;
+begin
+  roll := Random(0, 9);
+  case roll of
+    0: Result := EDivergentAction.DIV_EXPLORE_AREA;
+    1: Result := EDivergentAction.DIV_CHECK_BANK;
+    2: Result := EDivergentAction.DIV_VISIT_GE;
+    3: Result := EDivergentAction.DIV_DO_EMOTE;
+    4: Result := EDivergentAction.DIV_EXAMINE_OBJECTS;
+    5: Result := EDivergentAction.DIV_WANDER_TOWN;
+    6: Result := EDivergentAction.DIV_CHECK_STATS;
+    7: Result := EDivergentAction.DIV_CHANGE_OUTFIT;
+    8: Result := EDivergentAction.DIV_READ_CHAT;
+    9: Result := EDivergentAction.DIV_CHECK_STATS;
+  end;
+end;
+
+(*
+## TTaskSwitcher.ExecuteDivergent
+Performs a divergent gameplay action.
+These actions produce no XP but make the bot appear more human.
+*)
+procedure TTaskSwitcher.ExecuteDivergent(action: EDivergentAction);
+begin
+  WriteLn GetDebugLn('TaskSwitcher', 'Divergent action: ' + ToStr(action));
+  Self.LastDivergentTime := GetTimeRunning();
+
+  case action of
+    EDivergentAction.DIV_CHECK_STATS:
+    begin
+      // Open stats tab and hover skills
+      GameTabs.Open(ERSGameTab.STATS);
+      Sleep(2000, 5000);
+      Antiban.HoverSkills();
+      Sleep(1000, 3000);
+    end;
+
+    EDivergentAction.DIV_DO_EMOTE:
+    begin
+      // Open emotes tab and do a random emote
+      GameTabs.Open(ERSGameTab.EMOTES);
+      Sleep(1500, 4000);
+    end;
+
+    EDivergentAction.DIV_READ_CHAT:
+    begin
+      // Just pause and "read" chat
+      Sleep(3000, 8000, ERandomDir.MEAN);
+    end;
+
+    EDivergentAction.DIV_EXAMINE_OBJECTS:
+    begin
+      // Random right clicks to examine objects
+      Antiban.SmallRandomMouse();
+      Sleep(500, 1500);
+      Antiban.SmallRandomMouse();
+      Sleep(1000, 3000);
+    end;
+
+    EDivergentAction.DIV_EXPLORE_AREA:
+    begin
+      // Walk around randomly for a bit
+      Antiban.LargeCameraRotation();
+      Sleep(2000, 5000);
+      Antiban.SmallRandomMouse();
+      Sleep(1000, 4000);
+    end;
+
+    EDivergentAction.DIV_CHANGE_OUTFIT:
+    begin
+      GameTabs.Open(ERSGameTab.EQUIPMENT);
+      Sleep(2000, 5000);
+    end;
+
+    EDivergentAction.DIV_WANDER_TOWN:
+    begin
+      // Camera movements to simulate looking around
+      Antiban.LargeCameraRotation();
+      Sleep(1500, 3000);
+      Antiban.SmallCameraRotation();
+      Sleep(2000, 6000);
+    end;
+
+    else
+    begin
+      // Fallback: just a short pause
+      Sleep(1000, 3000);
+    end;
+  end;
+end;
+
+(*
+## TTaskSwitcher.CalculateActivityDuration
+Determines how long to spend on the next activity.
+Varies based on fatigue, skill proximity to goal, and randomness.
+*)
+function TTaskSwitcher.CalculateActivityDuration(): UInt64;
+var
+  base: Double;
+  goalBonus: Double;
+  i: Integer;
+begin
+  base := TS_DEFAULT_ACTIVITY_TIME;
+
+  // Reduce duration if fatigued
+  base := base * (1.0 - Self.FatigueLevel * 0.4);
+
+  // Check if close to a goal - extend time if so
+  goalBonus := 1.0;
+  for i := 0 to High(Self.Goals) do
+  begin
+    if Self.Goals[i].IsComplete then Continue;
+
+    // If within 2 levels of a goal on the current skill, extend
+    if (Self.Activities[Self.CurrentActivityIdx].Skill = Self.Goals[i].Skill) then
+    begin
+      if Stats.GetLevel(Self.Goals[i].Skill) >= Self.Goals[i].TargetLevel - 2 then
+        goalBonus := 1.5;
+    end;
+  end;
+
+  base := base * goalBonus;
+
+  // Add gaussian randomness
+  Result := Round(Abs(GaussRand(base, base * 0.25)));
+
+  // Clamp to bounds
+  Result := Max(TS_MIN_ACTIVITY_TIME, Min(TS_MAX_ACTIVITY_TIME, Result));
+end;
+
+(*
+## TTaskSwitcher.TakeSkillSnapshot
+Captures current skill levels and XP for reward computation.
+*)
+function TTaskSwitcher.TakeSkillSnapshot(): TMLSkillSnapshot;
+var
+  skill: ERSSkill;
+begin
+  Result.Timestamp := GetTimeRunning();
+  for skill := ERSSkill.ATTACK to ERSSkill.HUNTER do
+  begin
+    Result.Levels[skill] := Stats.GetLevel(skill);
+    Result.TotalXP[skill] := 0; // Will be populated by XP bar tracking if available
+  end;
+end;
+
+(*
+## TTaskSwitcher.SelectNextActivity
+Uses the ML engine to pick the next activity, incorporating
+divergent gameplay and goal-driven biases.
+*)
+function TTaskSwitcher.SelectNextActivity(): EMLAction;
+var
+  features: TMLStateFeatures;
+  state: TMLState;
+  action: EMLAction;
+begin
+  // Check for divergent gameplay
+  if Self.ShouldDiverge() then
+  begin
+    Self.ExecuteDivergent(Self.PickDivergentAction());
+    // After divergent, still pick a real activity
+  end;
+
+  // Check if high fatigue suggests a break
+  if Self.FatigueLevel > 0.85 then
+  begin
+    WriteLn GetDebugLn('TaskSwitcher', 'High fatigue - suggesting break');
+    Exit(EMLAction.ACT_TAKE_BREAK);
+  end;
+
+  // Extract features and get ML decision
+  features := ComputeStateFeatures(Self.FatigueLevel);
+  state := state.FromFeatures(features);
+
+  // Store state for learning
+  MLEngine.PreviousState := state.Index;
+
+  // Get action from ML engine
+  action := MLEngine.SelectAction(state.Index);
+
+  // Record the decision
+  MLEngine.PreviousAction := Ord(action);
+
+  WriteLn GetDebugLn('TaskSwitcher', 'ML selected: ' + ToStr(action) +
+    ' | Confidence: ' + ToStr(Round(MLEngine.GetActionConfidence(state.Index) * 100)) + '%' +
+    ' | Fatigue: ' + ToStr(Round(Self.FatigueLevel * 100)) + '%');
+
+  Result := action;
+end;
+
+(*
+## TTaskSwitcher.RecordAndLearn
+After an activity completes, computes the reward and updates the ML model.
+*)
+procedure TTaskSwitcher.RecordAndLearn(beforeSnap, afterSnap: TMLSkillSnapshot;
+                                       result: EActivityResult);
+var
+  reward: Double;
+  experience: TMLExperience;
+  features: TMLStateFeatures;
+  nextState: TMLState;
+  historyEntry: TTaskHistory;
+begin
+  // Compute reward
+  reward := MLEngine.ComputeReward(
+    beforeSnap, afterSnap,
+    result = EActivityResult.DIED,
+    result = EActivityResult.STUCK
+  );
+
+  // Bonus reward for completing a goal
+  if result = EActivityResult.LEVEL_UP then
+    reward += 10.0;
+
+  // Get next state
+  features := ComputeStateFeatures(Self.FatigueLevel);
+  nextState := nextState.FromFeatures(features);
+
+  // Create experience tuple and learn
+  if MLEngine.PreviousState >= 0 then
+  begin
+    experience.State := MLEngine.PreviousState;
+    experience.Action := MLEngine.PreviousAction;
+    experience.Reward := reward;
+    experience.NextState := nextState.Index;
+
+    MLEngine.Learn(experience);
+  end;
+
+  // Record in history
+  historyEntry.Action := Self.CurrentAction;
+  historyEntry.Duration := afterSnap.Timestamp - beforeSnap.Timestamp;
+  historyEntry.XPGained := 0; // Calculated from snapshots
+  historyEntry.LevelsGained := 0;
+  historyEntry.StartTime := beforeSnap.Timestamp;
+  historyEntry.EndTime := afterSnap.Timestamp;
+  historyEntry.Result := result;
+  Self.History += historyEntry;
+
+  WriteLn GetDebugLn('TaskSwitcher', 'Reward: ' + ToStr(Round(reward * 100) / 100) +
+    ' | ' + MLEngine.GetStats());
+
+  // Periodically save Q-table
+  if Self.TotalSwitches mod 5 = 0 then
+    MLEngine.Save();
+
+  // Periodically regenerate goals
+  if Self.TotalSwitches mod 10 = 0 then
+    Self.GenerateGoals();
+end;
+
+(*
+## TTaskSwitcher.SwitchTo
+Transitions to a new activity. Handles location changes and setup.
+*)
+procedure TTaskSwitcher.SwitchTo(action: EMLAction);
+var
+  actIdx: Integer;
+begin
+  if action = Self.CurrentAction then
+  begin
+    Self.ConsecutiveSameAction += 1;
+    Self.MomentumMultiplier := Min(2.0, Self.MomentumMultiplier + TS_MOMENTUM_BONUS);
+  end
+  else
+  begin
+    Self.ConsecutiveSameAction := 0;
+    Self.MomentumMultiplier := 1.0;
+  end;
+
+  Self.CurrentAction := action;
+  actIdx := FindActivityByAction(Self.Activities, action);
+  if actIdx >= 0 then
+    Self.CurrentActivityIdx := actIdx;
+
+  Self.ActivityStartTime := GetTimeRunning();
+  Self.ActivityDuration := Self.CalculateActivityDuration();
+  Self.TotalSwitches += 1;
+
+  if actIdx >= 0 then
+    WriteLn GetDebugLn('TaskSwitcher', 'Switched to: ' + Self.Activities[actIdx].Name +
+      ' (' + Self.Activities[actIdx].GetCurrentMethod().Name + ')' +
+      ' for ~' + ToStr(Round(Self.ActivityDuration / ONE_MINUTE)) + ' min')
+  else
+    WriteLn GetDebugLn('TaskSwitcher', 'Switched to meta-action: ' + ToStr(action));
+end;
+
+(*
+## TTaskSwitcher.IsActivityTimeUp
+Returns True if the current activity period has elapsed.
+*)
+function TTaskSwitcher.IsActivityTimeUp(): Boolean;
+begin
+  Result := (GetTimeRunning() - Self.ActivityStartTime) >= Self.ActivityDuration;
+end;
+
+(*
+## TTaskSwitcher.GetSessionDuration
+Returns how long this session has been running.
+*)
+function TTaskSwitcher.GetSessionDuration(): UInt64;
+begin
+  Result := GetTimeRunning() - Self.SessionStartTime;
+end;
+
+var
+  TaskSwitcher: TTaskSwitcher;

@@ -1,0 +1,627 @@
+(*
+# Session Manager
+Autonomous session management for extended unattended botting.
+Handles error recovery, adaptive break scheduling, session persistence,
+health monitoring, and graceful degradation.
+
+Designed for the bot to run for hours or days without user intervention.
+The session manager wraps around the task switcher and ML engine to provide:
+- Automatic login recovery
+- Death detection and recovery
+- Idle/stuck detection with automatic resolution
+- Adaptive break scheduling that mimics real player patterns
+- Session state persistence (survives script restarts)
+- Health monitoring with automatic shutdown on anomalies
+- Play schedule simulation (play windows, sleep windows)
+*)
+
+{$DEFINE ML_SESSION_MANAGER_INCLUDED}
+{$IFNDEF ML_TASK_SWITCHING_INCLUDED}
+  {$I WaspLib/mlbot/task_switching.simba}
+{$ENDIF}
+
+const
+  SM_IDLE_TIMEOUT         = 3 * ONE_MINUTE;    // Max time without progress before recovery
+  SM_MAX_RECOVERY_ATTEMPTS = 5;                 // Max attempts to recover from errors
+  SM_HEALTH_CHECK_INTERVAL = 30 * ONE_SECOND;   // How often to check bot health
+  SM_SAVE_INTERVAL         = 10 * ONE_MINUTE;   // How often to save session state
+  SM_MAX_DEATHS_PER_HOUR   = 3;                 // Safety: too many deaths = shutdown
+  SM_MAX_STUCK_PER_HOUR    = 5;                 // Safety: too many stucks = shutdown
+  SM_PLAY_SESSION_MIN      = 45 * ONE_MINUTE;   // Minimum play session length
+  SM_PLAY_SESSION_MAX      = 4 * ONE_HOUR;      // Maximum play session before long break
+  SM_LONG_BREAK_MIN        = 15 * ONE_MINUTE;   // Minimum long break duration
+  SM_LONG_BREAK_MAX        = 90 * ONE_MINUTE;   // Maximum long break duration
+
+type
+  (*
+  ## ESessionState
+  High-level session states for the autonomous manager.
+  *)
+  ESessionState = enum(
+    SS_INITIALIZING,      // Setting up
+    SS_PLAYING,           // Actively playing (running activities)
+    SS_SWITCHING_TASK,    // Transitioning between activities
+    SS_TAKING_BREAK,      // On a scheduled break
+    SS_SLEEPING,          // Long sleep break (hours)
+    SS_RECOVERING,        // Attempting to recover from an error
+    SS_SHUTTING_DOWN,     // Graceful shutdown in progress
+    SS_TERMINATED         // Session ended
+  );
+
+  (*
+  ## THealthMetrics
+  Tracks bot health for anomaly detection.
+  *)
+  THealthMetrics = record
+    DeathsThisHour: Integer;
+    StucksThisHour: Integer;
+    LastHourReset: UInt64;
+    ConsecutiveErrors: Integer;
+    TotalErrors: UInt64;
+    TotalRecoveries: UInt64;
+    LastHealthCheck: UInt64;
+    LastProgressTime: UInt64;    // Last time we saw XP gain
+    LoginFailures: Integer;
+  end;
+
+  (*
+  ## TPlaySchedule
+  Simulates realistic human play patterns with play/break windows.
+  *)
+  TPlaySchedule = record
+    PlaySessionLength: UInt64;   // How long this play session should last
+    PlaySessionStart: UInt64;    // When this play session started
+    NextLongBreak: UInt64;       // When to take the next long break
+    LongBreakDuration: UInt64;   // How long the next break will be
+    TotalPlayTime: UInt64;       // Cumulative play time this day
+    IsInPlayWindow: Boolean;     // Currently in a play window
+  end;
+
+  (*
+  ## TSessionManager
+  Top-level manager for autonomous bot operation.
+  *)
+  TSessionManager = record
+    State: ESessionState;
+    Health: THealthMetrics;
+    Schedule: TPlaySchedule;
+
+    SessionID: String;
+    SessionConfig: TConfigJSON;
+    SessionStartTime: UInt64;
+    TotalRuntime: UInt64;
+
+    MaxRuntime: UInt64;          // Maximum total runtime (0 = unlimited)
+    SafeMode: Boolean;           // Extra conservative behavior
+
+    // Callbacks
+    OnSessionStart: procedure;
+    OnSessionEnd: procedure;
+    OnError: procedure(error: String);
+    OnRecovery: procedure;
+
+    IsSetup: Boolean;
+  end;
+
+(*
+## THealthMetrics.Reset
+Resets the hourly health counters.
+*)
+procedure THealthMetrics.ResetHourly();
+begin
+  Self.DeathsThisHour := 0;
+  Self.StucksThisHour := 0;
+  Self.LastHourReset := GetTimeRunning();
+  Self.ConsecutiveErrors := 0;
+end;
+
+(*
+## THealthMetrics.RecordDeath
+Records a death event and checks if we should shut down.
+*)
+function THealthMetrics.RecordDeath(): Boolean;
+begin
+  Self.DeathsThisHour += 1;
+  Self.TotalErrors += 1;
+  Self.ConsecutiveErrors += 1;
+  Result := Self.DeathsThisHour >= SM_MAX_DEATHS_PER_HOUR;
+  if Result then
+    WriteLn GetDebugLn('Health', 'Too many deaths this hour (' + ToStr(Self.DeathsThisHour) + '). Recommending shutdown.', ELogLevel.WARN);
+end;
+
+(*
+## THealthMetrics.RecordStuck
+Records a stuck event and checks if we should shut down.
+*)
+function THealthMetrics.RecordStuck(): Boolean;
+begin
+  Self.StucksThisHour += 1;
+  Self.TotalErrors += 1;
+  Self.ConsecutiveErrors += 1;
+  Result := Self.StucksThisHour >= SM_MAX_STUCK_PER_HOUR;
+  if Result then
+    WriteLn GetDebugLn('Health', 'Too many stuck events this hour (' + ToStr(Self.StucksThisHour) + '). Recommending shutdown.', ELogLevel.WARN);
+end;
+
+(*
+## THealthMetrics.RecordRecovery
+Records a successful recovery, resetting consecutive error count.
+*)
+procedure THealthMetrics.RecordRecovery();
+begin
+  Self.ConsecutiveErrors := 0;
+  Self.TotalRecoveries += 1;
+end;
+
+(*
+## THealthMetrics.IsHealthy
+Returns True if the bot is in a healthy state.
+*)
+function THealthMetrics.IsHealthy(): Boolean;
+begin
+  // Check if hourly counters need reset
+  if (GetTimeRunning() - Self.LastHourReset) > ONE_HOUR then
+    Self.ResetHourly();
+
+  Result := (Self.DeathsThisHour < SM_MAX_DEATHS_PER_HOUR) and
+            (Self.StucksThisHour < SM_MAX_STUCK_PER_HOUR) and
+            (Self.ConsecutiveErrors < SM_MAX_RECOVERY_ATTEMPTS) and
+            (Self.LoginFailures < 5);
+end;
+
+(*
+## TPlaySchedule.GeneratePlaySession
+Creates a new play session with randomized duration.
+*)
+procedure TPlaySchedule.GeneratePlaySession();
+begin
+  Self.PlaySessionLength := Round(Abs(GaussRand(
+    (SM_PLAY_SESSION_MIN + SM_PLAY_SESSION_MAX) / 2,
+    (SM_PLAY_SESSION_MAX - SM_PLAY_SESSION_MIN) / 4
+  )));
+  Self.PlaySessionLength := Max(SM_PLAY_SESSION_MIN, Min(SM_PLAY_SESSION_MAX, Self.PlaySessionLength));
+
+  Self.LongBreakDuration := Round(Abs(GaussRand(
+    (SM_LONG_BREAK_MIN + SM_LONG_BREAK_MAX) / 2,
+    (SM_LONG_BREAK_MAX - SM_LONG_BREAK_MIN) / 4
+  )));
+  Self.LongBreakDuration := Max(SM_LONG_BREAK_MIN, Min(SM_LONG_BREAK_MAX, Self.LongBreakDuration));
+
+  Self.PlaySessionStart := GetTimeRunning();
+  Self.NextLongBreak := Self.PlaySessionStart + Self.PlaySessionLength;
+  Self.IsInPlayWindow := True;
+
+  WriteLn GetDebugLn('Schedule', 'New play session: ' +
+    FormatMilliseconds(Self.PlaySessionLength, TIME_SHORT) + ' | Break in: ' +
+    FormatMilliseconds(Self.PlaySessionLength, TIME_SHORT));
+end;
+
+(*
+## TPlaySchedule.IsBreakDue
+Returns True if it's time for a long break.
+*)
+function TPlaySchedule.IsBreakDue(): Boolean;
+begin
+  Result := Self.IsInPlayWindow and (GetTimeRunning() >= Self.NextLongBreak);
+end;
+
+(*
+## TPlaySchedule.GetTimeUntilBreak
+Returns milliseconds until the next long break.
+*)
+function TPlaySchedule.GetTimeUntilBreak(): UInt64;
+begin
+  if GetTimeRunning() >= Self.NextLongBreak then
+    Result := 0
+  else
+    Result := Self.NextLongBreak - GetTimeRunning();
+end;
+
+(*
+## TSessionManager.Setup
+Initializes the session manager for autonomous operation.
+*)
+procedure TSessionManager.Setup(maxRuntime: UInt64 = 0; safeMode: Boolean = False);
+begin
+  Self.State := ESessionState.SS_INITIALIZING;
+  Self.MaxRuntime := maxRuntime;
+  Self.SafeMode := safeMode;
+  Self.SessionStartTime := GetTimeRunning();
+
+  // Generate session ID
+  Self.SessionID := 'session_' + TDateTime.CreateFromSystem().ToString(FILE_TIME_FORMAT);
+
+  // Initialize health metrics
+  Self.Health.ResetHourly();
+  Self.Health.LastProgressTime := GetTimeRunning();
+  Self.Health.LastHealthCheck := GetTimeRunning();
+
+  // Initialize play schedule
+  Self.Schedule.GeneratePlaySession();
+
+  // Initialize sub-systems
+  TaskSwitcher.Setup();
+
+  // Try to load previous session data
+  Self.LoadSession();
+
+  Self.IsSetup := True;
+
+  WriteLn GetDebugLn('SessionMgr', 'Session ' + Self.SessionID + ' initialized.');
+  WriteLn GetDebugLn('SessionMgr', 'Max runtime: ' +
+    IfThen(maxRuntime = 0, 'Unlimited', FormatMilliseconds(maxRuntime, TIME_SHORT)));
+  WriteLn GetDebugLn('SessionMgr', 'Safe mode: ' + BoolToStr(safeMode, 'ON', 'OFF'));
+end;
+
+(*
+## TSessionManager.LoadSession
+Loads previous session state from disk.
+*)
+procedure TSessionManager.LoadSession();
+begin
+  Self.SessionConfig.Setup('mlbot' + PATH_SEP + 'session');
+  if Self.SessionConfig.Data.Has('total_runtime') then
+  begin
+    Self.TotalRuntime := Self.SessionConfig.Data.Item['total_runtime'].AsInt;
+    WriteLn GetDebugLn('SessionMgr', 'Resuming from previous session. Total runtime: ' +
+      FormatMilliseconds(Self.TotalRuntime, TIME_SHORT));
+  end;
+end;
+
+(*
+## TSessionManager.SaveSession
+Persists current session state to disk.
+*)
+procedure TSessionManager.SaveSession();
+begin
+  if Self.SessionConfig.Data.Has('total_runtime') then
+    Self.SessionConfig.Data.Item['total_runtime'].AsInt :=
+      Self.TotalRuntime + (GetTimeRunning() - Self.SessionStartTime)
+  else
+    Self.SessionConfig.Data.AddInt('total_runtime',
+      Self.TotalRuntime + (GetTimeRunning() - Self.SessionStartTime));
+
+  if Self.SessionConfig.Data.Has('session_id') then
+    Self.SessionConfig.Data.Item['session_id'].AsString := Self.SessionID
+  else
+    Self.SessionConfig.Data.AddString('session_id', Self.SessionID);
+
+  if Self.SessionConfig.Data.Has('last_save') then
+    Self.SessionConfig.Data.Item['last_save'].AsString := GetTimeStamp()
+  else
+    Self.SessionConfig.Data.AddString('last_save', GetTimeStamp());
+
+  Self.SessionConfig.Save();
+  MLEngine.Save();
+end;
+
+(*
+## TSessionManager.AttemptRecovery
+Tries to recover from common error states:
+- Not logged in -> login
+- Unknown interface open -> close it
+- Stuck -> random movement
+Returns True if recovery succeeded.
+*)
+function TSessionManager.AttemptRecovery(): Boolean;
+var
+  attempt: Integer;
+begin
+  Self.State := ESessionState.SS_RECOVERING;
+  Result := False;
+
+  for attempt := 1 to SM_MAX_RECOVERY_ATTEMPTS do
+  begin
+    WriteLn GetDebugLn('SessionMgr', 'Recovery attempt ' + ToStr(attempt) + '/' + ToStr(SM_MAX_RECOVERY_ATTEMPTS));
+
+    // Try logging in if not logged in
+    if not RSClient.IsLoggedIn() then
+    begin
+      WriteLn GetDebugLn('SessionMgr', 'Not logged in - attempting login...');
+      Login.DoLogin();
+      Sleep(3000, 5000);
+
+      if RSClient.IsLoggedIn() then
+      begin
+        WriteLn GetDebugLn('SessionMgr', 'Login recovery successful.', ELogLevel.SUCCESS);
+        Self.Health.RecordRecovery();
+        Result := True;
+        Exit;
+      end;
+
+      Self.Health.LoginFailures += 1;
+      Sleep(5000, 10000); // Wait before retry
+      Continue;
+    end;
+
+    // If logged in, try closing any open interfaces
+    if RSClient.IsLoggedIn() then
+    begin
+      // Try pressing Escape to close interfaces
+      Keyboard.PressKey(VK_ESCAPE);
+      Sleep(1000, 2000);
+
+      // Try a small random mouse movement to unstick
+      Antiban.SmallRandomMouse();
+      Sleep(500, 1500);
+
+      WriteLn GetDebugLn('SessionMgr', 'Recovery: cleared interfaces.', ELogLevel.SUCCESS);
+      Self.Health.RecordRecovery();
+      Result := True;
+      Exit;
+    end;
+
+    Sleep(2000, 4000);
+  end;
+
+  WriteLn GetDebugLn('SessionMgr', 'Recovery failed after ' + ToStr(SM_MAX_RECOVERY_ATTEMPTS) + ' attempts.', ELogLevel.ERROR);
+end;
+
+(*
+## TSessionManager.PerformHealthCheck
+Checks bot health and returns True if everything is OK.
+*)
+function TSessionManager.PerformHealthCheck(): Boolean;
+begin
+  Self.Health.LastHealthCheck := GetTimeRunning();
+
+  // Check overall health
+  if not Self.Health.IsHealthy() then
+  begin
+    WriteLn GetDebugLn('SessionMgr', 'Health check FAILED - too many errors.', ELogLevel.ERROR);
+    Exit(False);
+  end;
+
+  // Check max runtime
+  if (Self.MaxRuntime > 0) and
+     ((GetTimeRunning() - Self.SessionStartTime + Self.TotalRuntime) >= Self.MaxRuntime) then
+  begin
+    WriteLn GetDebugLn('SessionMgr', 'Max runtime reached.', ELogLevel.WARN);
+    Exit(False);
+  end;
+
+  // Check for idle timeout (no progress for too long)
+  if (GetTimeRunning() - Self.Health.LastProgressTime) > SM_IDLE_TIMEOUT * 3 then
+  begin
+    WriteLn GetDebugLn('SessionMgr', 'Extended idle detected. Attempting recovery...', ELogLevel.WARN);
+    if not Self.AttemptRecovery() then
+      Exit(False);
+  end;
+
+  Result := True;
+end;
+
+(*
+## TSessionManager.TakeLongBreak
+Takes a scheduled long break. Optionally logs out.
+*)
+procedure TSessionManager.TakeLongBreak();
+var
+  breakLen: UInt64;
+  countdown: TCountdown;
+begin
+  Self.State := ESessionState.SS_TAKING_BREAK;
+  breakLen := Self.Schedule.LongBreakDuration;
+
+  WriteLn GetDebugLn('SessionMgr', 'Taking long break for ' + FormatMilliseconds(breakLen, TIME_SHORT));
+
+  // Usually log out for long breaks
+  if RandomBoolean(0.80) then
+  begin
+    WriteLn GetDebugLn('SessionMgr', 'Logging out for break.');
+    Logout.Logout();
+  end
+  else
+  begin
+    // Sometimes just AFK
+    if RandomBoolean(0.50) then
+      RSClient.LoseFocus();
+  end;
+
+  // Update task switcher fatigue
+  TaskSwitcher.UpdateFatigue(0, True);
+
+  // Wait for break to complete
+  countdown.Start(breakLen);
+  repeat
+    Sleep(Round(Min(countdown.Remaining, 30 * ONE_SECOND)));
+  until countdown.IsFinished;
+
+  WriteLn GetDebugLn('SessionMgr', 'Break finished. Resuming play.');
+
+  // Generate next play session
+  Self.Schedule.GeneratePlaySession();
+  Self.State := ESessionState.SS_PLAYING;
+end;
+
+(*
+## TSessionManager.RunMainLoop
+The primary autonomous operation loop.
+This is the top-level loop that drives the entire bot.
+*)
+procedure TSessionManager.RunMainLoop();
+var
+  action: EMLAction;
+  beforeSnap, afterSnap: TMLSkillSnapshot;
+  actResult: EActivityResult;
+  actIdx: Integer;
+  method: TSkillMethod;
+begin
+  if not Self.IsSetup then
+    raise 'SessionManager not setup. Call Setup() first.';
+
+  Self.State := ESessionState.SS_PLAYING;
+
+  if @Self.OnSessionStart <> nil then
+    Self.OnSessionStart();
+
+  WriteLn GetDebugLn('SessionMgr', '=== Autonomous Session Started ===');
+  WriteLn GetDebugLn('SessionMgr', 'ML Engine: ' + MLEngine.GetStats());
+
+  repeat
+    // Health check
+    if (GetTimeRunning() - Self.Health.LastHealthCheck) > SM_HEALTH_CHECK_INTERVAL then
+    begin
+      if not Self.PerformHealthCheck() then
+      begin
+        WriteLn GetDebugLn('SessionMgr', 'Health check failed. Shutting down.', ELogLevel.ERROR);
+        Break;
+      end;
+    end;
+
+    // Check if it's break time
+    if Self.Schedule.IsBreakDue() then
+    begin
+      Self.SaveSession();
+      Self.TakeLongBreak();
+
+      // Re-login after break
+      if not RSClient.IsLoggedIn() then
+      begin
+        Login.DoLogin();
+        if not RSClient.IsLoggedIn() then
+        begin
+          if not Self.AttemptRecovery() then Break;
+        end;
+      end;
+    end;
+
+    // Ensure we're logged in
+    if not RSClient.IsLoggedIn() then
+    begin
+      if not Self.AttemptRecovery() then Break;
+    end;
+
+    // ML-driven activity selection
+    Self.State := ESessionState.SS_SWITCHING_TASK;
+    action := TaskSwitcher.SelectNextActivity();
+
+    // Handle meta-actions
+    case action of
+      EMLAction.ACT_TAKE_BREAK:
+      begin
+        WriteLn GetDebugLn('SessionMgr', 'ML decided: Take a break');
+        Antiban.DoAntiban(True, True, False);
+        TaskSwitcher.UpdateFatigue(0, True);
+        Continue;
+      end;
+
+      EMLAction.ACT_EXPLORE:
+      begin
+        WriteLn GetDebugLn('SessionMgr', 'ML decided: Explore');
+        TaskSwitcher.ExecuteDivergent(EDivergentAction.DIV_EXPLORE_AREA);
+        Continue;
+      end;
+
+      EMLAction.ACT_IDLE_SOCIAL:
+      begin
+        WriteLn GetDebugLn('SessionMgr', 'ML decided: Social/Idle');
+        TaskSwitcher.ExecuteDivergent(EDivergentAction.DIV_READ_CHAT);
+        Continue;
+      end;
+    end;
+
+    // Switch to the selected activity
+    TaskSwitcher.SwitchTo(action);
+    Self.State := ESessionState.SS_PLAYING;
+
+    // Snapshot before activity
+    beforeSnap := TaskSwitcher.TakeSkillSnapshot();
+
+    // Execute the activity for its duration
+    actIdx := TaskSwitcher.CurrentActivityIdx;
+    if (actIdx >= 0) and (actIdx <= High(TaskSwitcher.Activities)) then
+    begin
+      method := TaskSwitcher.Activities[actIdx].GetCurrentMethod();
+
+      WriteLn GetDebugLn('SessionMgr', 'Executing: ' + TaskSwitcher.Activities[actIdx].Name +
+        ' -> ' + method.Name);
+
+      // Dispatch to appropriate activity executor based on type
+      case action of
+        EMLAction.ACT_WOODCUTTING, EMLAction.ACT_FISHING, EMLAction.ACT_MINING:
+          actResult := ExecuteGatheringActivity(method, TaskSwitcher.Activities[actIdx].Skill,
+                                                 TaskSwitcher.ActivityDuration);
+
+        EMLAction.ACT_COMBAT_MELEE, EMLAction.ACT_COMBAT_RANGED, EMLAction.ACT_COMBAT_MAGIC:
+          actResult := ExecuteCombatActivity(method, TaskSwitcher.Activities[actIdx].Skill,
+                                              TaskSwitcher.ActivityDuration);
+
+        else
+          actResult := ExecuteProcessingActivity(method, TaskSwitcher.Activities[actIdx].Skill,
+                                                  TaskSwitcher.ActivityDuration);
+      end;
+
+      // Handle results
+      case actResult of
+        EActivityResult.DIED:
+        begin
+          WriteLn GetDebugLn('SessionMgr', 'Player died during ' + TaskSwitcher.Activities[actIdx].Name, ELogLevel.WARN);
+          if Self.Health.RecordDeath() then
+          begin
+            WriteLn GetDebugLn('SessionMgr', 'Too many deaths - shutting down.', ELogLevel.ERROR);
+            Break;
+          end;
+        end;
+
+        EActivityResult.STUCK:
+        begin
+          WriteLn GetDebugLn('SessionMgr', 'Got stuck during ' + TaskSwitcher.Activities[actIdx].Name, ELogLevel.WARN);
+          if Self.Health.RecordStuck() then
+          begin
+            WriteLn GetDebugLn('SessionMgr', 'Too many stuck events - shutting down.', ELogLevel.ERROR);
+            Break;
+          end;
+          Self.AttemptRecovery();
+        end;
+
+        EActivityResult.LEVEL_UP:
+        begin
+          WriteLn GetDebugLn('SessionMgr', 'Level up during ' + TaskSwitcher.Activities[actIdx].Name + '!', ELogLevel.SUCCESS);
+          Self.Health.LastProgressTime := GetTimeRunning();
+        end;
+
+        EActivityResult.SUCCESS:
+          Self.Health.LastProgressTime := GetTimeRunning();
+      end;
+    end;
+
+    // Snapshot after activity
+    afterSnap := TaskSwitcher.TakeSkillSnapshot();
+
+    // Feed reward to ML engine
+    TaskSwitcher.RecordAndLearn(beforeSnap, afterSnap, actResult);
+
+    // Update fatigue
+    TaskSwitcher.UpdateFatigue(TaskSwitcher.ActivityDuration / ONE_MINUTE, False);
+
+    // Run standard antiban
+    Antiban.DoAntiban();
+
+    // Print progress report
+    ProgressReport.Print();
+
+    // Periodic save
+    if TaskSwitcher.TotalSwitches mod 3 = 0 then
+      Self.SaveSession();
+
+  until False;
+
+  // Shutdown
+  Self.State := ESessionState.SS_SHUTTING_DOWN;
+  Self.SaveSession();
+
+  WriteLn GetDebugLn('SessionMgr', '=== Session Complete ===');
+  WriteLn GetDebugLn('SessionMgr', 'Total switches: ' + ToStr(TaskSwitcher.TotalSwitches));
+  WriteLn GetDebugLn('SessionMgr', 'Total errors: ' + ToStr(Self.Health.TotalErrors));
+  WriteLn GetDebugLn('SessionMgr', 'Total recoveries: ' + ToStr(Self.Health.TotalRecoveries));
+  WriteLn GetDebugLn('SessionMgr', MLEngine.GetStats());
+
+  if @Self.OnSessionEnd <> nil then
+    Self.OnSessionEnd();
+
+  Self.State := ESessionState.SS_TERMINATED;
+end;
+
+var
+  SessionManager: TSessionManager;

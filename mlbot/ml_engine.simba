@@ -1,0 +1,446 @@
+(*
+# ML Engine - Q-Learning Decision System
+Implements a tabular Q-learning reinforcement learning engine for OSRS.
+The agent learns which activities yield the best rewards (XP/hour, levels gained)
+based on the current game state (skill levels, time of day, fatigue).
+
+State space is discretized into buckets. The Q-table is persisted to disk
+so the bot improves across sessions.
+*)
+
+{$DEFINE ML_ENGINE_INCLUDED}
+{$IFNDEF WL_OSR}
+  {$I WaspLib/osrs.simba}
+{$ENDIF}
+
+const
+  ML_VERSION          = '1.0.0';
+  ML_LEARNING_RATE    = 0.15;    // Alpha: how fast we learn from new info
+  ML_DISCOUNT_FACTOR  = 0.90;    // Gamma: how much we value future rewards
+  ML_EXPLORE_RATE_MAX = 0.40;    // Epsilon start: exploration probability
+  ML_EXPLORE_RATE_MIN = 0.05;    // Epsilon floor: minimum exploration
+  ML_EXPLORE_DECAY    = 0.9985;  // Epsilon decay per decision step
+  ML_STATE_BUCKETS    = 5;       // Discretize continuous values into N buckets
+  ML_MAX_ACTIONS      = 24;      // Maximum distinct actions (skills + special)
+  ML_MAX_STATES       = 3125;    // 5^5 state combinations
+  ML_REWARD_XP_SCALE  = 0.001;   // XP gained -> reward scaling
+  ML_REWARD_LEVEL_UP  = 50.0;    // Bonus reward for leveling up
+  ML_PENALTY_IDLE     = -5.0;    // Penalty for idle/stuck time
+  ML_PENALTY_DEATH    = -25.0;   // Penalty for dying
+
+type
+  (*
+  ## EMLAction
+  Enumeration of all possible bot actions (activities the bot can choose).
+  *)
+  EMLAction = enum(
+    ACT_WOODCUTTING,
+    ACT_FISHING,
+    ACT_MINING,
+    ACT_COOKING,
+    ACT_FIREMAKING,
+    ACT_SMITHING,
+    ACT_CRAFTING,
+    ACT_FLETCHING,
+    ACT_HERBLORE,
+    ACT_THIEVING,
+    ACT_AGILITY,
+    ACT_HUNTER,
+    ACT_FARMING,
+    ACT_RUNECRAFTING,
+    ACT_CONSTRUCTION,
+    ACT_COMBAT_MELEE,
+    ACT_COMBAT_RANGED,
+    ACT_COMBAT_MAGIC,
+    ACT_PRAYER,
+    ACT_SLAYER,
+    ACT_EXPLORE,       // Random exploration / divergent play
+    ACT_BANK_MANAGE,   // Organize bank, sell items
+    ACT_IDLE_SOCIAL,   // Chat, emote, wander - humanlike filler
+    ACT_TAKE_BREAK     // Proactive break (learned anti-ban)
+  );
+
+  EMLActionSet = set of EMLAction;
+
+  (*
+  ## TMLStateFeatures
+  Raw continuous features extracted from game state.
+  *)
+  TMLStateFeatures = record
+    AvgCombatLevel: Single;     // Average of atk/str/def/hp/range/mage/prayer
+    AvgSkillingLevel: Single;   // Average of non-combat skills
+    SkillImbalance: Single;     // Std deviation of all skill levels (0=balanced)
+    SessionFatigue: Single;     // 0.0 (fresh) to 1.0 (need break)
+    TimeOfDayBucket: Single;    // 0.0-1.0 mapped from hour of day
+  end;
+
+  (*
+  ## TMLState
+  Discretized state representation (index into Q-table).
+  *)
+  TMLState = record
+    Index: Integer;             // Flattened index into Q-table
+    Features: TMLStateFeatures; // Raw features for debugging
+  end;
+
+  (*
+  ## TMLExperience
+  Single experience tuple for learning.
+  *)
+  TMLExperience = record
+    State: Integer;
+    Action: Integer;
+    Reward: Double;
+    NextState: Integer;
+  end;
+
+  (*
+  ## TMLSkillSnapshot
+  Snapshot of all skill levels at a point in time.
+  *)
+  TMLSkillSnapshot = record
+    Levels: array [ERSSkill] of Integer;
+    TotalXP: array [ERSSkill] of Integer;
+    Timestamp: UInt64;
+  end;
+
+  (*
+  ## TMLEngine
+  Core Q-learning engine. Maintains a Q-table mapping (state, action) pairs
+  to expected cumulative reward. Uses epsilon-greedy exploration.
+  *)
+  TMLEngine = record
+    QTable: array of array of Double;  // [state][action]
+    ActionVisits: array of array of Integer; // visit counts
+    ExploreRate: Double;
+    TotalDecisions: UInt64;
+    TotalReward: Double;
+    EnabledActions: EMLActionSet;
+    PreviousState: Integer;
+    PreviousAction: Integer;
+    PreviousSnapshot: TMLSkillSnapshot;
+    ConfigPath: String;
+    IsSetup: Boolean;
+  end;
+
+(*
+## TMLStateFeatures.Discretize
+Converts a continuous feature [0.0, 1.0] into a bucket index [0, ML_STATE_BUCKETS-1].
+*)
+function DiscretizeBucket(value: Single; buckets: Integer = ML_STATE_BUCKETS): Integer;
+begin
+  Result := Trunc(Min(Max(value, 0.0), 0.9999) * buckets);
+end;
+
+(*
+## TMLState.FromFeatures
+Constructs a discretized state from raw features.
+The state index is a flattened multi-dimensional index.
+*)
+function TMLState.FromFeatures(features: TMLStateFeatures): TMLState;
+var
+  b0, b1, b2, b3, b4: Integer;
+begin
+  Result.Features := features;
+
+  b0 := DiscretizeBucket(features.AvgCombatLevel / 99.0);
+  b1 := DiscretizeBucket(features.AvgSkillingLevel / 99.0);
+  b2 := DiscretizeBucket(features.SkillImbalance / 40.0);  // max ~40 std dev
+  b3 := DiscretizeBucket(features.SessionFatigue);
+  b4 := DiscretizeBucket(features.TimeOfDayBucket);
+
+  Result.Index := b0 * (ML_STATE_BUCKETS * ML_STATE_BUCKETS * ML_STATE_BUCKETS * ML_STATE_BUCKETS)
+                + b1 * (ML_STATE_BUCKETS * ML_STATE_BUCKETS * ML_STATE_BUCKETS)
+                + b2 * (ML_STATE_BUCKETS * ML_STATE_BUCKETS)
+                + b3 * ML_STATE_BUCKETS
+                + b4;
+end;
+
+(*
+## TMLEngine.Setup
+Initializes the Q-table (zeroed or loaded from disk).
+*)
+procedure TMLEngine.Setup(enabledActions: EMLActionSet; configDir: String = '');
+var
+  s, a: Integer;
+  config: TConfigJSON;
+  stateArr, actionArr: TJSONItem;
+begin
+  Self.EnabledActions := enabledActions;
+  Self.ExploreRate := ML_EXPLORE_RATE_MAX;
+  Self.TotalDecisions := 0;
+  Self.TotalReward := 0.0;
+  Self.PreviousState := -1;
+  Self.PreviousAction := -1;
+
+  if configDir = '' then
+    Self.ConfigPath := WLEnv.ConfigsDir + 'mlbot' + PATH_SEP
+  else
+    Self.ConfigPath := configDir;
+
+  DirCreate(Self.ConfigPath);
+
+  // Allocate Q-table
+  SetLength(Self.QTable, ML_MAX_STATES, ML_MAX_ACTIONS);
+  SetLength(Self.ActionVisits, ML_MAX_STATES, ML_MAX_ACTIONS);
+
+  for s := 0 to ML_MAX_STATES - 1 do
+    for a := 0 to ML_MAX_ACTIONS - 1 do
+    begin
+      Self.QTable[s][a] := 0.0;
+      Self.ActionVisits[s][a] := 0;
+    end;
+
+  // Try loading saved Q-table
+  if FileExists(Self.ConfigPath + 'qtable.json') then
+  begin
+    config.Setup(Self.ConfigPath + 'qtable');
+    if config.Data.Has('explore_rate') then
+      Self.ExploreRate := config.Data.Item['explore_rate'].AsFloat;
+    if config.Data.Has('total_decisions') then
+      Self.TotalDecisions := config.Data.Item['total_decisions'].AsInt;
+
+    if config.Data.Has('qtable') then
+    begin
+      stateArr := config.Data.Item['qtable'];
+      for s := 0 to Min(stateArr.Count - 1, ML_MAX_STATES - 1) do
+      begin
+        actionArr := stateArr.Item[s];
+        for a := 0 to Min(actionArr.Count - 1, ML_MAX_ACTIONS - 1) do
+          Self.QTable[s][a] := actionArr.Item[a].AsFloat;
+      end;
+    end;
+
+    WriteLn GetDebugLn('MLEngine', 'Loaded Q-table from disk. Decisions so far: ' + ToStr(Self.TotalDecisions));
+  end
+  else
+    WriteLn GetDebugLn('MLEngine', 'Starting with fresh Q-table.');
+
+  Self.IsSetup := True;
+  WriteLn GetDebugLn('MLEngine', 'ML Engine v' + ML_VERSION + ' initialized. Explore rate: ' + ToStr(Round(Self.ExploreRate * 100)) + '%');
+end;
+
+(*
+## TMLEngine.Save
+Persists the Q-table to disk for cross-session learning.
+*)
+procedure TMLEngine.Save();
+var
+  config: TConfigJSON;
+  s, a: Integer;
+  stateArr, actionArr: TJSONItem;
+  hasNonZero: Boolean;
+begin
+  config.Setup(Self.ConfigPath + 'qtable');
+
+  if config.Data.Has('explore_rate') then
+    config.Data.Item['explore_rate'].AsFloat := Self.ExploreRate
+  else
+    config.Data.AddFloat('explore_rate', Self.ExploreRate);
+
+  if config.Data.Has('total_decisions') then
+    config.Data.Item['total_decisions'].AsInt := Self.TotalDecisions
+  else
+    config.Data.AddInt('total_decisions', Self.TotalDecisions);
+
+  // Save only non-zero Q-values to reduce file size
+  stateArr := config.Data.AddArray('qtable');
+  for s := 0 to ML_MAX_STATES - 1 do
+  begin
+    actionArr := stateArr.AddArray();
+    for a := 0 to ML_MAX_ACTIONS - 1 do
+      actionArr.AddFloat(Self.QTable[s][a]);
+  end;
+
+  config.Save();
+  WriteLn GetDebugLn('MLEngine', 'Q-table saved. Total decisions: ' + ToStr(Self.TotalDecisions));
+end;
+
+(*
+## TMLEngine.GetBestAction
+Returns the action with highest Q-value for a given state among enabled actions.
+*)
+function TMLEngine.GetBestAction(stateIdx: Integer): Integer;
+var
+  a, bestAction: Integer;
+  bestQ: Double;
+  first: Boolean;
+begin
+  bestQ := -1e18;
+  bestAction := 0;
+  first := True;
+
+  for a := 0 to ML_MAX_ACTIONS - 1 do
+  begin
+    if not (EMLAction(a) in Self.EnabledActions) then Continue;
+
+    if first or (Self.QTable[stateIdx][a] > bestQ) then
+    begin
+      bestQ := Self.QTable[stateIdx][a];
+      bestAction := a;
+      first := False;
+    end;
+  end;
+
+  Result := bestAction;
+end;
+
+(*
+## TMLEngine.SelectAction
+Epsilon-greedy action selection. With probability epsilon, pick a random
+enabled action (exploration). Otherwise pick the best known action (exploitation).
+*)
+function TMLEngine.SelectAction(stateIdx: Integer): EMLAction;
+var
+  a, count, chosen: Integer;
+  enabledList: array of Integer;
+begin
+  // Build list of enabled action indices
+  for a := 0 to ML_MAX_ACTIONS - 1 do
+    if EMLAction(a) in Self.EnabledActions then
+      enabledList += a;
+
+  if Length(enabledList) = 0 then
+  begin
+    WriteLn GetDebugLn('MLEngine', 'No actions enabled! Defaulting to EXPLORE.', ELogLevel.WARN);
+    Exit(EMLAction.ACT_EXPLORE);
+  end;
+
+  // Epsilon-greedy
+  if Random() < Self.ExploreRate then
+  begin
+    // Exploration: random action, biased towards less-visited actions
+    chosen := enabledList[Random(0, High(enabledList))];
+    WriteLn GetDebugLn('MLEngine', 'EXPLORE -> ' + ToStr(EMLAction(chosen)));
+  end
+  else
+  begin
+    // Exploitation: best known action
+    chosen := Self.GetBestAction(stateIdx);
+    WriteLn GetDebugLn('MLEngine', 'EXPLOIT -> ' + ToStr(EMLAction(chosen)) +
+                        ' (Q=' + ToStr(Round(Self.QTable[stateIdx][chosen] * 100) / 100) + ')');
+  end;
+
+  // Decay exploration rate
+  Self.ExploreRate := Max(ML_EXPLORE_RATE_MIN, Self.ExploreRate * ML_EXPLORE_DECAY);
+  Self.TotalDecisions += 1;
+  Self.ActionVisits[stateIdx][chosen] += 1;
+
+  Result := EMLAction(chosen);
+end;
+
+(*
+## TMLEngine.Learn
+Performs a single Q-learning update from an experience tuple:
+  Q(s,a) <- Q(s,a) + alpha * [reward + gamma * max_a' Q(s',a') - Q(s,a)]
+*)
+procedure TMLEngine.Learn(experience: TMLExperience);
+var
+  currentQ, maxNextQ, newQ: Double;
+  bestNext: Integer;
+begin
+  currentQ := Self.QTable[experience.State][experience.Action];
+
+  // Find best Q-value in next state
+  bestNext := Self.GetBestAction(experience.NextState);
+  maxNextQ := Self.QTable[experience.NextState][bestNext];
+
+  // Q-learning update
+  newQ := currentQ + ML_LEARNING_RATE * (experience.Reward + ML_DISCOUNT_FACTOR * maxNextQ - currentQ);
+  Self.QTable[experience.State][experience.Action] := newQ;
+
+  Self.TotalReward += experience.Reward;
+end;
+
+(*
+## TMLEngine.ComputeReward
+Calculates the reward signal from comparing skill snapshots before and after
+an activity execution period.
+*)
+function TMLEngine.ComputeReward(before, after: TMLSkillSnapshot; died, gotStuck: Boolean): Double;
+var
+  skill: ERSSkill;
+  totalXPGain: Integer;
+  levelsGained: Integer;
+  timeDelta: Double;
+begin
+  Result := 0.0;
+  totalXPGain := 0;
+  levelsGained := 0;
+
+  for skill := ERSSkill.ATTACK to ERSSkill.HUNTER do
+  begin
+    totalXPGain += Max(0, after.TotalXP[skill] - before.TotalXP[skill]);
+    if after.Levels[skill] > before.Levels[skill] then
+      levelsGained += (after.Levels[skill] - before.Levels[skill]);
+  end;
+
+  // XP reward (scaled)
+  Result += totalXPGain * ML_REWARD_XP_SCALE;
+
+  // Level-up bonus
+  Result += levelsGained * ML_REWARD_LEVEL_UP;
+
+  // Time efficiency: reward XP/time ratio
+  timeDelta := Max(1.0, (after.Timestamp - before.Timestamp) / 1000.0); // seconds
+  if totalXPGain > 0 then
+    Result += (totalXPGain / timeDelta) * 0.1;  // XP/sec bonus
+
+  // Penalties
+  if died then
+    Result += ML_PENALTY_DEATH;
+
+  if gotStuck then
+    Result += ML_PENALTY_IDLE;
+
+  // Small penalty for zero progress (idle)
+  if totalXPGain = 0 then
+    Result += ML_PENALTY_IDLE * 0.5;
+end;
+
+(*
+## TMLEngine.GetActionConfidence
+Returns a confidence score [0.0, 1.0] for how sure the model is about
+its best action in the given state. Useful for the UI.
+*)
+function TMLEngine.GetActionConfidence(stateIdx: Integer): Double;
+var
+  a, totalVisits: Integer;
+  bestQ, sumQ: Double;
+  count: Integer;
+begin
+  bestQ := Self.QTable[stateIdx][Self.GetBestAction(stateIdx)];
+  sumQ := 0.0;
+  count := 0;
+  totalVisits := 0;
+
+  for a := 0 to ML_MAX_ACTIONS - 1 do
+    if EMLAction(a) in Self.EnabledActions then
+    begin
+      sumQ += Self.QTable[stateIdx][a];
+      totalVisits += Self.ActionVisits[stateIdx][a];
+      count += 1;
+    end;
+
+  if (count <= 1) or (totalVisits < 10) then
+    Exit(0.0);
+
+  // Confidence based on how much the best action's Q stands out
+  if Abs(sumQ) < 0.001 then
+    Result := 0.0
+  else
+    Result := Min(1.0, Max(0.0, (bestQ - (sumQ / count)) / Max(1.0, Abs(bestQ))));
+end;
+
+(*
+## TMLEngine.GetStats
+Returns a formatted string of the engine's current statistics.
+*)
+function TMLEngine.GetStats(): String;
+begin
+  Result := Format('Decisions: %d | Explore: %d%% | Reward: %.1f',
+    [Self.TotalDecisions, Round(Self.ExploreRate * 100), Self.TotalReward]);
+end;
+
+var
+  MLEngine: TMLEngine;
