@@ -420,30 +420,37 @@ begin
   if not TWalker.MakePointVisibleEx(me, Self.Coordinates.NearestPoint(me)) then
     Exit;
 
-  Result := Self._UpTextCheck(shouldExit, action);
-  if shouldExit then Exit;
+  // Simba-AI fork (FORK.md, #229): same shape as TObject.Hover -- the
+  // walker's TargetUpText was written here and never cleared.
+  try
+    Result := Self._UpTextCheck(shouldExit, action);
+    if shouldExit then Exit;
 
-  for attempt := 0 to attempts do
-  begin
-    if Self.Find(coordinates, atpa) then
+    for attempt := 0 to attempts do
     begin
-      if attempt < 2 then i := 0
-      else if Length(atpa) > (attempt - 2) then i := attempt - 2
-      else i := Random(Low(atpa), High(atpa));
+      if Self.Find(coordinates, atpa) then
+      begin
+        if attempt < 2 then i := 0
+        else if Length(atpa) > (attempt - 2) then i := attempt - 2
+        else i := Random(Low(atpa), High(atpa));
 
-      tpa := atpa[i].ExtractBox(MainScreen.Bounds);
-      if tpa = [] then
-        Continue;
+        tpa := atpa[i].ExtractBox(MainScreen.Bounds);
+        if tpa = [] then
+          Continue;
 
-      Self.LastCoordinate := coordinates[i];
+        Self.LastCoordinate := coordinates[i];
 
-      Mouse.Move(tpa.RandomMean());
+        Mouse.Move(tpa.RandomMean());
 
-      if Self.UpText = [] then Exit(True);
+        if Self.UpText = [] then Exit(True);
+      end;
+
+      if TObject._HoverHelper(Self.UpText + action, attempt, attempts) then
+        Exit(True);
     end;
-
-    if TObject._HoverHelper(Self.UpText + action, attempt, attempts) then
-      Exit(True);
+  finally
+    Self.Walker^.TargetUpText := [];
+    Self.Walker^.ActionUpText := [];
   end;
 end;
 
