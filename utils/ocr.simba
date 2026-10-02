@@ -72,6 +72,68 @@ begin
   end;
 end;
 
+
+// Simba-AI fork (FORK.md 3, #239): the native engine reads outside the
+// image it is given. TPixelOCR._RecognizeX tests a glyph against the image
+// with the bounds of its points, then reads its background one pixel wider
+// on every side (`B.Expand(1)`, simba.pixelocr.pas, Simba 146e4d67): a glyph
+// that matches on the top or bottom row reads a row outside the image
+// buffer, as wide as the glyph. TImage.isBinary, which every entry point
+// calls, reads past the end of a binary image (its and/or precedence, fixed
+// upstream in Simba d99ce70d). Next to an unmapped page the read faults:
+// two runs died of an Access violation in the chat read. Each entry point
+// below hands the native method a view onto a copy of the image with one
+// black row and one black pixel before and after it, so no read leaves
+// memory the call owns, and the rows above and below read black.
+type
+  TPixelOCRBuffer = array of TColorBGRA;
+
+// The view onto a copy of `image` in `buffer`, which must outlive the view.
+// An empty image comes back as it is: the engine reads none of it.
+function TPixelOCR._GuardedView(image: TImage; out buffer: TPixelOCRBuffer): TImage; static;
+var
+  w, h: Integer;
+begin
+  w := image.Width;
+  h := image.Height;
+  if (w = 0) or (h = 0) then
+    Exit(image);
+
+  SetLength(buffer, (h + 2) * w + 2);
+  Move(image.Data^, buffer[w + 1], w * h * SizeOf(TColorBGRA));
+  Result := new TImage();
+  Result.SetExternalData(@buffer[w + 1], w, h);
+end;
+
+function TPixelOCR.Recognize(Image: TImage; constref Font: TPixelFont; P: TPoint): String; override;
+var
+  buffer: TPixelOCRBuffer;
+begin
+  Result := inherited(TPixelOCR._GuardedView(Image, buffer), Font, P);
+end;
+
+function TPixelOCR.Recognize(Image: TImage; constref Font: TPixelFont; Bounds: TBox = [-1,-1,-1,-1]): String; override;
+var
+  buffer: TPixelOCRBuffer;
+begin
+  Result := inherited(TPixelOCR._GuardedView(Image, buffer), Font, Bounds);
+end;
+
+function TPixelOCR.RecognizeLines(Image: TImage; constref Font: TPixelFont; Bounds: TBox = [-1,-1,-1,-1]): TStringArray; override;
+var
+  buffer: TPixelOCRBuffer;
+begin
+  Result := inherited(TPixelOCR._GuardedView(Image, buffer), Font, Bounds);
+end;
+
+function TPixelOCR.Locate(Image: TImage; constref Font: TPixelFont; Text: String): Single; override;
+var
+  buffer: TPixelOCRBuffer;
+begin
+  Result := inherited(TPixelOCR._GuardedView(Image, buffer), Font, Text);
+end;
+
+
 var
   TEXT_SHADOW: TColor = $000000;
 
