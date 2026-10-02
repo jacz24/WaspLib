@@ -84,6 +84,20 @@ begin
 end;
 
 
+// Simba-AI fork (FORK.md, #357): True when `text` is the uptext of a
+// selected item or spell (`Use X -> Y`, `Cast X -> Y`): it starts with `Use`
+// or `Cast` and holds a '>'. Stock read any '>' as a selection, and the
+// uptext OCR can add '>' noise after the real text (`Remove Drawers / 2
+// more options >hV>`): Interact then sent no move and no click while the
+// noise stayed. No space after the verb, as the OCR can drop one
+// (`UseSteel bar`), and '>' alone, not '->', so a dropped dash still reads
+// as a selection.
+function TMainScreen.IsSelectionUpText(text: String): Boolean; static;
+begin
+  Result := (text.StartsWith('Use') or text.StartsWith('Cast')) and text.Contains('>');
+end;
+
+
 
 function TMainScreen._IsUpText(
   out upText: String;

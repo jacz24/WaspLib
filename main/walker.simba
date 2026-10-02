@@ -472,7 +472,10 @@ begin
     Exit;
   end;
 
-  if MainScreen.IsUpText('>') and not Self.ActionUpText.AnyContains('>') then
+  // Simba-AI fork (FORK.md, #357): a selected item, not any '>' (OCR noise).
+  // IsUpText's poll stays first, so a click with no '>' waits as stock did.
+  if MainScreen.IsUpText('>') and TMainScreen.IsSelectionUpText(MainScreen.UpText) and
+     not Self.ActionUpText.AnyContains('>') then
   begin
     ChooseOption.Select('Cancel');
     Exit;

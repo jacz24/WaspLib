@@ -294,7 +294,8 @@ begin
 
   text := MainScreen.UpText;
 
-  if text.Contains('>') and not action.Contains(['>']) then
+  // Simba-AI fork (FORK.md, #357): a selected item, not any '>' (OCR noise).
+  if TMainScreen.IsSelectionUpText(text) and not action.Contains(['>']) then
   begin
     ChooseOption.Close();
     Exit;
