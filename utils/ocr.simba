@@ -73,12 +73,12 @@ begin
 end;
 
 
-// Simba-AI fork (FORK.md 3, #239): the native engine reads outside the
-// image it is given. TPixelOCR._RecognizeX tests a glyph against the image
-// with the bounds of its points, then reads its background one pixel wider
-// on every side (`B.Expand(1)`, simba.pixelocr.pas, Simba 146e4d67): a glyph
-// that matches on the top or bottom row reads a row outside the image
-// buffer, as wide as the glyph. TImage.isBinary, which every entry point
+// Simba-AI fork (FORK.md, #239): the native engine reads outside the image
+// it is given. TPixelOCR._RecognizeX tests a glyph against the image with
+// the bounds of its points and shadow, then reads its background one pixel
+// wider on every side (`B.Expand(1)`, simba.pixelocr.pas, Simba 146e4d67):
+// a glyph that matches on the top or bottom row reads a row outside the
+// image buffer, as wide as the glyph. TImage.isBinary, which every entry point
 // calls, reads past the end of a binary image (its and/or precedence, fixed
 // upstream in Simba d99ce70d). Next to an unmapped page the read faults:
 // two runs died of an Access violation in the chat read. Each entry point
