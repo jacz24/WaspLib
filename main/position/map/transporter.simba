@@ -59,51 +59,58 @@ type
   );
 
 const
+  // Simba-AI fork (FORK.md, #41): each landing is the dest tile of the
+  // spell's row in Skretzo's shortest-path (teleportation_spells.tsv and
+  // teleportation_spells_home.tsv @ 8551e60), in Map.Position's frame:
+  // the tile's corner x*4, (12607-y)*4, plus RSTranslator.MapWidth of X
+  // per plane (only APE_ATOLL lands off plane 0). HOUSE_INSIDE,
+  // HOUSE_OUTSIDE and RESPAWN stay empty: they land where the account's
+  // house or respawn point is.
   TELEPORT_COORDINATES: array [ESpellTeleport] of TPoint = [
     [], //HOUSE_INSIDE
     [], //HOUSE_OUTSIDE
-    [], //KOUREND
-    [], //LASSAR
-    [], //OURANIA
+    [6564, 35736], //KOUREND
+    [12016, 36548], //LASSAR
+    [9872, 37444], //OURANIA
     [], //RESPAWN
-    [], //VARROCK
-    [], //GRAND EXCHANGE
-    [], //CAMELOT
-    [], //SEERS
-    [], //KHAZARD
-    [], //FALADOR
-    [], //BARROWS
-    [], //MOONCLAN
-    [], //CEMETERY
-    [], //GHORROCK
-    [], //ARDOUGNE
-    [], //PADDEWWA
-    [], //KHARYRLL
-    [], //ANNAKARL
-    [], //CATHERBY
-    [], //APE_ATOLL_DUNGEON
-    [], //LUMBRIDGE
-    [], //BARBARIAN
-    [], //APE_ATOLL
-    [], //TROLLHEIM
-    [], //MIND_ALTAR
-    [], //WATCHTOWER
-    [], //YANILLE
-    [], //ICE_PLATEU
-    [], //LUNAR_HOME
-    [], //FENKENSTRAINS_CASTLE
-    [], //SALVE_GRAVEYARD
-    [], //ARCEUUS_LIBRARY
-    [], //HARMONY_ISLAND
-    [], //EDGEVILLE_HOME
-    [], //DRAYNOR_MANOR
-    [], //FISHING_GUILD
-    [], //LUMBRIDGE_HOME
-    [], //WEST_ARDOUGNE
-    [], //CARRALLANGAR
-    [], //ARCEUUS_HOME
-    [], //WATERBIRTH
-    [] //SENNTISTEN
+    [12852, 36732], //VARROCK
+    [12660, 36512], //GRAND EXCHANGE
+    [11028, 36512], //CAMELOT
+    [10904, 36480], //SEERS
+    [10544, 37760], //KHAZARD
+    [11856, 36916], //FALADOR
+    [14256, 37168], //BARROWS
+    [8452, 34768], //MOONCLAN
+    [11924, 35380], //CEMETERY
+    [11904, 34928], //GHORROCK
+    [10648, 37208], //ARDOUGNE
+    [12388, 10904], //PADDEWWA
+    [13976, 36536], //KHARYRLL
+    [13152, 34876], //ANNAKARL
+    [11204, 36632], //CATHERBY
+    [11084, 14020], //APE_ATOLL_DUNGEON
+    [12884, 37556], //LUMBRIDGE
+    [10172, 36152], //BARBARIAN
+    [36788, 39236], //APE_ATOLL
+    [11560, 35712], //TROLLHEIM
+    [11916, 36388], //MIND_ALTAR
+    [10184, 37980], //WATCHTOWER
+    [10336, 38040], //YANILLE
+    [11900, 34676], //ICE_PLATEU
+    [8452, 34768], //LUNAR_HOME
+    [14192, 36312], //FENKENSTRAINS_CASTLE
+    [13732, 36592], //SALVE_GRAVEYARD
+    [6528, 35080], //ARCEUUS_LIBRARY
+    [15188, 38964], //HARMONY_ISLAND
+    [12348, 36412], //EDGEVILLE_HOME
+    [12436, 37024], //DRAYNOR_MANOR
+    [10452, 36864], //FISHING_GUILD
+    [12884, 37556], //LUMBRIDGE_HOME
+    [10000, 37268], //WEST_ARDOUGNE
+    [12632, 35764], //CARRALLANGAR
+    [6800, 34900], //ARCEUUS_HOME
+    [10184, 35408], //WATERBIRTH
+    [13280, 37080] //SENNTISTEN
   ];
 
 type
