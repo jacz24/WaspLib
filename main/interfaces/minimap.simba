@@ -21,6 +21,23 @@ type
     Circle : TCircle;
   end;
 
+  // Simba-AI fork (FORK.md, #421): the compass dial as the client draws it, sprite 169 turned about its
+  // pixel (25, 25) by SpritePixels.drawRotatedMaskedCenteredAround, inside the spans of mask 1179 and
+  // under the minimap frame 1177 (Simba-AI simba-kb/osrs/camera-projection.md section 12). Lo..Hi is the
+  // last read's run of 1/16384 turns that draws every seen pixel; Cached keeps it for the next read.
+  TCompassDial = record
+    Sprite: TIntegerMatrix;
+    Seen: TPointArray;
+    DX, DY, Sines, Cosines: TIntegerArray;
+    Lo, Hi: Integer;
+    Cached: Boolean;
+
+    const TURN: Integer = 16384;
+    const DIAL: TImage = ImageFromString('IMG:AQAAADMAAAAzAAAAAAAAALjT+gUAAAAAkjQnAAEAAABQxhAHAAAAADAokQgAAAAA8OdqAAEAAAAwCSwHAAAAAFD8GQgAAAAAQNwnBwAAAABQ/BkIAAAAAGs/AQABAAAABAAAAAAAAADp/UwAAQAAALjT+gUAAAAAIpAnAAEAAAAwKJEIAAAAAFmhAAABiVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAIAAAC1w6d9AAAACXBIWXMAAAAAAAAAAACdYiYyAAAEJUlEQVR4nL2ZP2tUQRTFtzYq+QKWFimECAEVsiFsRERFEAULEZutRBstFFJFG0EEu3SmEEHQSiMipNRCBCvt/BIWWnvgrIe7d+7cN29XA4fH+7dvfpx7Z+bO7ODUytGahieWnEarx6xOry1TZ9a9eN+9L7nPhq0P5iGziO1Y+00muL5Y/4asBqew5kwh1n/0rEwyOrd/ZEkQz22sWCVwIVkIVyVLsGpApXrxNZElWPTDEVw8e/LyhVUK51CJ2LcTeLI8tyyTpUnUCBeQ1QLvyGz41Oq1KxvQ+Pp5yp1Djs8FtyOajVjOJ8d0fOnIrfElCuchn0Jcg2PEuslsvlurLJOlge7evArxBDdDvjKyNedisgRLTOQQjSOThFiDqwU0IAuxnFVocvPODejB/TGOoHFH3ocSuLBDVMnKnmjdklVs+/HWbYg0uIRoHu7wkeWzcMy5PKYD+6zEYspbLMsEbT+5hyNoeEky3ucj8Tm4JKaezMnGkV90WGzbktnz59tb9gULpw7hYurgYrJaHB0WmrcEn/de6PzVziP7VHDMuTCm3WQu8W0chbX35hlaRfPU7sunXz+9fXhgAUecQ7yPd/Cmwmo7hGzrQVZmmI2j3IJDZBLWzsHDOH7/8oE3Ibwj5wRX2qaxd4rM1QJuALMZJsPkFoAgoECWjKJ/dM7GVF1BI0homyezk2OZYTJMEQTBj28fifVufUQ43CGcIivbymyz8+kUmSsBwsHChlJYELGQSY4MQSScIyOc7aRJQCdkfKDaq0wyF0prGDhqZKFtPchUHCuUIiMTv2hDKSwZJjIH57JNX8OXCdePTCMZfs/GCAQOCK2Ghv3+9bO0jb0El/gh+fjBGcnaPUOThxY3FxbfL6+9pnCOOy2eNUVTeebIbJ65jsk0cnAOa9480wq2Vw9Q3wSH4IglMkRQZLW+6Qrd2cczR0Y4OUcmaobxLCOrTZrJSGv5FMRkpC3LoXgOaCk03LzJqRD2aH60NDaInFsTw7J5s2VGL0sgDgEKq+BUa8gt1ho2w2q1RjdZuCoJyw1N7ao4LFM5l89bn4W2hXC27oAYOzGVWGVNG+Z+R7Xdsg6wfCwSXZXr1gGNhk3WTjUyuxToXKRQCKJjqi1P8rXTFFm4qqstg8uFHQW37KWYHFY5upZJNllvlg/CgTdco2s9DJ8wT+No15gta/QQq2lfo4Rz+xokgEkgw1FAlskGMcfqJhtG2wi1vSCIPrG2yfeCGjfSmnapLFzJJwlFKpncZFgzrMfOnots456j3RbthdVEVnZYt0/LjVm7Sev2aVlc5UzDfAd5+Hfjz54kfPn2tqplN0y2YPXYdQ/5RtGfYr3+C6thdfxTkSAmM0c7UI2piUw/bszCRqBOrCbPcqyZ1dloE1nZP2amaWHqTTaPfy43WvQHKgVsHTk7S5AAAAAASUVORK5CYII=');
+    const MASK: TImage = ImageFromString('IMG:AQAAACMAAAAjAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAwCSwHAAAAABqTJwABAAAA8OdqAAEAAACArxUHAAAAAFD8GQgAAAAA0AcNBwAAAABQ/BkIAAAAAGs/AQABAAAAEA0dBwAAAAC7BwEAAQAAALjT+gUAAAAAIpAnAAEAAACQZB0HAAAAAFmhAAABiVBORw0KGgoAAAANSUhEUgAAACMAAAAjCAIAAACRuyQOAAAACXBIWXMAAAAAAAAAAACdYiYyAAAABnRSTlMAAAAAAABupgeRAAAAbklEQVR4nO3WwQrAIAwD0O7/f9rjYGpbZxOxNHgT8k5iROTxHSXeht/AKhnGmFiYYXrxzAyDMEMMxfQYkPlgdAmaVyIkq1SpVG4M7/Vmk+j/Exo7tyN424i696gblrrLdzytTblbxYwq/dpDuhoaXQABAktavwEAAAAASUVORK5CYII=');
+    const FRAME: TImage = ImageFromString('IMG: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');
+  end;
+
 
   TMinimap = record
     Orbs: array of TMinimapOrb;
@@ -32,6 +49,7 @@ type
     Compass: record
       Circle: TCircle;
       Accuracy: Single;
+      Dial: TCompassDial;
     end;
 
     Mask: TPointArray;
@@ -158,7 +176,129 @@ end;
 
 
 
-property TMinimap.CompassRadians: Single;
+// A sprite pixel as the client holds it: 0 where transparent.
+function TCompassDial.ClientPixel(img: TImage; x, y: Integer): Integer; static;
+begin
+  if img.Alpha[x, y] = 0 then
+    Exit(0);
+  Result := img.Pixel[x, y];
+end;
+
+procedure TCompassDial.Setup();
+var
+  x, y, first, last, q: Integer;
+begin
+  SetLength(Self.Sprite, TCompassDial.DIAL.Height);
+  for y := 0 to TCompassDial.DIAL.Height - 1 do
+  begin
+    SetLength(Self.Sprite[y], TCompassDial.DIAL.Width);
+    for x := 0 to TCompassDial.DIAL.Width - 1 do
+      Self.Sprite[y][x] := TCompassDial.ClientPixel(TCompassDial.DIAL, x, y);
+  end;
+
+  // Widget.getSpriteMask: a row spans its first to its last transparent pixel, the whole row if none.
+  for y := 0 to TCompassDial.MASK.Height - 1 do
+  begin
+    first := -1;
+    for x := 0 to TCompassDial.MASK.Width - 1 do
+      if TCompassDial.ClientPixel(TCompassDial.MASK, x, y) = 0 then
+      begin
+        if first = -1 then
+          first := x;
+        last := x;
+      end;
+    if first = -1 then
+    begin
+      first := 0;
+      last := TCompassDial.MASK.Width - 1;
+    end;
+
+    // The frame 1177 is drawn at (w - 181, 1), 4 px up and left of the dial's box.
+    for x := first to last do
+      if TCompassDial.ClientPixel(TCompassDial.FRAME, x + 4, y + 4) = 0 then
+      begin
+        Self.Seen += [Point(x, y)];
+        Self.DX += [x - TCompassDial.MASK.Width div 2];
+        Self.DY += [y - TCompassDial.MASK.Height div 2];
+      end;
+  end;
+
+  // Java's (int) truncates toward zero.
+  SetLength(Self.Sines, TCompassDial.TURN);
+  SetLength(Self.Cosines, TCompassDial.TURN);
+  for q := 0 to TCompassDial.TURN - 1 do
+  begin
+    Self.Sines[q] := Trunc(Sin(q * TAU / TCompassDial.TURN) * 65536);
+    Self.Cosines[q] := Trunc(Cos(q * TAU / TCompassDial.TURN) * 65536);
+  end;
+end;
+
+// The seen pixels on screen, about the compass circle's centre.
+function TCompassDial.Screen(center: TPoint): TColorArray;
+begin
+  if Self.Seen = [] then
+    Self.Setup();
+  Result := Target.GetColors(Self.Seen.Offset(Point(center.X - TCompassDial.MASK.Width div 2, center.Y - TCompassDial.MASK.Height div 2)));
+end;
+
+// Does the dial at q/16384 of a turn draw every seen pixel as the screen shows it? The client's
+// arithmetic: sine and cosine truncated to 16.16 fixed point, each pixel the source pixel its point
+// floors into. Every point lies inside the sprite, so the shift never meets a negative number.
+function TCompassDial.Draws(q: Integer; constref screen: TColorArray): Boolean;
+const
+  PIVOT: Integer = 25 shl 16;
+var
+  i, s, c: Integer;
+begin
+  q := q and (TCompassDial.TURN - 1);
+  s := Self.Sines[q];
+  c := Self.Cosines[q];
+  for i := 0 to High(screen) do
+    if Self.Sprite[(Self.DY[i] * c - Self.DX[i] * s + PIVOT) shr 16][(Self.DY[i] * s + Self.DX[i] * c + PIVOT) shr 16] <> screen[i] then
+      Exit(False);
+  Result := True;
+end;
+
+// From q outward to the nearest angle that draws the dial, then that angle's whole run. A needle read
+// a few degrees off costs a few hundred draws, each one ended at its first unlike pixel.
+function TCompassDial.Match(constref screen: TColorArray; q: Integer): Boolean;
+var
+  d: Integer;
+begin
+  Self.Cached := False;
+  for d := 0 to TCompassDial.TURN div 2 do
+  begin
+    if Self.Draws(q + d, screen) then
+      Self.Lo := q + d
+    else if Self.Draws(q - d, screen) then
+      Self.Lo := q - d
+    else
+      Continue;
+
+    Self.Hi := Self.Lo;
+    while (Self.Hi - Self.Lo < TCompassDial.TURN) and Self.Draws(Self.Lo - 1, screen) do
+      Dec(Self.Lo);
+    while (Self.Hi - Self.Lo < TCompassDial.TURN) and Self.Draws(Self.Hi + 1, screen) do
+      Inc(Self.Hi);
+    Self.Cached := True;
+    Exit(True);
+  end;
+end;
+
+// The run's middle in radians. Inside a band beside a right angle the run is 3.34 degrees wide, and
+// the middle can be 1.68 degrees off.
+function TCompassDial.Radians(): Single;
+var
+  mid: Double;
+begin
+  mid := (Self.Lo + Self.Hi) / 2;
+  Result := (mid - Floor(mid / TCompassDial.TURN) * TCompassDial.TURN) * TAU / TCompassDial.TURN;
+end;
+
+
+// Simba-AI fork (FORK.md, #421): stock's CompassRadians body, renamed. WaspLib's read of the compass
+// needle (the red points and the N), now the dial match's starting angle.
+function TMinimap._NeedleRadians(): Single;
 var
   center: TPoint;
   bounds: TBox;
@@ -204,6 +344,28 @@ begin
     Result := Result + TAU;
 end;
 
+// Simba-AI fork (FORK.md, #421): in the resizable classic layout, the exact dial match, checked first at
+// the angle the last read kept; in another layout, or where no angle draws the dial, the needle read.
+property TMinimap.CompassRadians: Single;
+var
+  screen: TColorArray;
+begin
+  if Client.Mode <> EMode.RESIZABLE then
+    Exit(Self._NeedleRadians());
+
+  screen := Self.Compass.Dial.Screen(Self.Compass.Circle.Center);
+  if not (Self.Compass.Dial.Cached and Self.Compass.Dial.Draws(Self.Compass.Dial.Lo, screen)) then
+  begin
+    Result := Self._NeedleRadians();
+    if not Self.Compass.Dial.Match(screen, Round(Result / TAU * TCompassDial.TURN)) then
+    begin
+      DebugLn('Minimap', 'No angle draws the compass dial; the needle read is used.', ELogLevel.WARN);
+      Exit;
+    end;
+  end;
+  Result := Self.Compass.Dial.Radians();
+end;
+
 property TMinimap.CompassRadians(radians: Single): Boolean;
 const
   RAD_PER_PIXEL: Single = 162.2004206;
@@ -246,6 +408,7 @@ begin
     destination.Y := Random(Target.MouseY + 100, available.Y2);
 
     Mouse.Drag(destination, EMouseButton.MIDDLE);
+    Self.Compass.Dial.Cached := False; // Simba-AI fork (FORK.md, #421): the turn drops the kept dial angle
     Biometrics.Sleep(100, 1000, ERandomDir.LEFT);
   until Time() > timeout;
 
