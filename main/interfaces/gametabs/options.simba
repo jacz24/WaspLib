@@ -175,7 +175,9 @@ begin
 
   if Result then
   begin
-    Self.ZoomLevel := level;
+    // Simba-AI fork (FORK.md, #420): the level the slider reads, not the asked one: SetLevel
+    // accepts 1 off, and the camera's zoom law takes the knob's position from it (#419).
+    Self.ZoomLevel := Self.Sliders[EOptionsSlider.ZOOM].GetLevel();
     DebugLn('Options', 'Current zoom level set to: ' + ToString(Self.ZoomLevel), ELogLevel.SUCCESS);
   end
   else
