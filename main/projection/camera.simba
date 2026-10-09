@@ -90,18 +90,18 @@ end;
 
 procedure TCamera.Update(zoom: Integer; rads: Single);
 var
-  pos, f: Integer;
+  knob, f: Integer;
   zs: Single;
 begin
   // Simba-AI fork (FORK.md, #420): zoom is a level TSlider.GetLevel read; its 97 positions are 97
   // levels, so the level gives the position back, and the client's zoom law, H * (int) 2^(7 + v/256)
-  // / 334, takes the position (#419). shortcut: no wide-window limit; add it if a wide client misfits.
-  pos := (zoom * 96 + 99) div 100;
-  f := Trunc(Power(2, 7 + (128 + 8 * pos) / 256));
+  // / 334, takes the position (#419). shortcut: no wide-window limit, add it if a wide client misfits.
+  knob := (zoom * 96 + 99) div 100;
+  f := Trunc(Power(2, 7 + (128 + 8 * knob) / 256));
   zs := (f - 181) / (1448 - 181);
   if Self.ZoomScale <> zs then
   begin
-    Self.Z := Self.ZOffset + Round(1237 * (Self.MAX_PITCH - Self.Pitch) / (Self.MAX_PITCH - Self.MIN_PITCH) - (pos/96) * 75);
+    Self.Z := Self.ZOffset + Round(1237 * (Self.MAX_PITCH - Self.Pitch) / (Self.MAX_PITCH - Self.MIN_PITCH) - (knob/96) * 75);
     Self.ZoomScale := zs;
     Self.Scale := MainScreen.Bounds.Height * f div 334;
     Self.ReverseZ := Round(Self.MinZ + Self.ZoomScale * (Self.MaxZ-Self.MinZ));
@@ -109,7 +109,8 @@ begin
 
   if Self.Radians <> rads then
   begin
-    Self.Yaw := Round(rads / TAU * 2048) mod 2048; // Simba-AI fork (FORK.md, #420): the client's 1/2048 turn
+    // Simba-AI fork (FORK.md, #420): the client's 1/2048 turn, rounded.
+    Self.Yaw := Round(rads / TAU * 2048) mod 2048;
     Self.Camera.X := Round(Self.Center.X + Cos(rads) * (Self.X - Self.Center.X) - Sin(rads) * (Self.Y - Self.Center.Y));
     Self.Camera.Y := Round(Self.Center.Y + Sin(rads) * (Self.X - Self.Center.X) + Cos(rads) * (Self.Y - Self.Center.Y));
     Self.Origin.X := Self.Camera.X - Self.Player.X;
