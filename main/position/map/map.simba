@@ -294,6 +294,9 @@ begin
 
   Self.Region := Self.Loader.Regions[Self.RegionIndex];
   Result := Self.Loader.GetGlobal(Self.RegionIndex, Result);
+  // Simba-AI fork (FORK.md 7, #421, ADR-0014): inside a dial band, the minimap fit about the tile's pixel (2, 2).
+  Minimap.FitCompass(Self.Loader.Map, Self.Region.Region,
+    Self.Loader.GetLocal(Self.RegionIndex, [Result.X div 4 * 4 + 2, Result.Y div 4 * 4 + 2]));
 
   if Self.Normalize then
     Result := RSTranslator.Normalize(Result);

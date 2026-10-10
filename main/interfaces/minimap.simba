@@ -25,15 +25,22 @@ type
   // pixel (25, 25) by SpritePixels.drawRotatedMaskedCenteredAround, inside the spans of mask 1179 and
   // under the minimap frame 1177 (Simba-AI simba-kb/osrs/camera-projection.md section 12). Lo..Hi is the
   // last read's run of 1/16384 turns that draws every seen pixel, Lo in 0..TURN-1; Cached keeps it for the
-  // next read; Missed holds the WARN line back until a read matches again.
+  // next read; Missed holds the WARN line back until a read matches again. Disk (FX, FY) is the minimap's
+  // 72 px disk for the minimap fit (FORK.md 7), and Fitted marks a kept run the fit has narrowed or tried.
   TCompassDial = record
     Sprite: TIntegerMatrix;
-    Seen: TPointArray;
-    DX, DY, Sines, Cosines: TIntegerArray;
+    Seen, Disk: TPointArray;
+    DX, DY, Sines, Cosines, FX, FY: TIntegerArray;
     Lo, Hi: Integer;
-    Cached, Missed: Boolean;
+    Cached, Missed, Fitted: Boolean;
 
     const TURN: Integer = 16384;
+    // The minimap fit (Simba-AI camera-projection.md section 13): the disk's radius, the tolerance of a
+    // colour per channel, the shortest run that is a band (a bound over 0.4 degrees), the coarse step.
+    const FIT_RADIUS: Integer = 72;
+    const FIT_TOL: Integer = 3;
+    const FIT_BAND: Integer = 36;
+    const FIT_STEP: Integer = 8;
     // Each image is SaveToString of Simba-AI's tools/cache_census/data/compass/<id>.png (SpriteDump of the cache).
     const DIAL: TImage = ImageFromString('IMG:AQAAADMAAAAzAAAAAAAAALjT+gUAAAAAkjQnAAEAAABQxhAHAAAAADAokQgAAAAA8OdqAAEAAAAwCSwHAAAAAFD8GQgAAAAAQNwnBwAAAABQ/BkIAAAAAGs/AQABAAAABAAAAAAAAADp/UwAAQAAALjT+gUAAAAAIpAnAAEAAAAwKJEIAAAAAFmhAAABiVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAIAAAC1w6d9AAAACXBIWXMAAAAAAAAAAACdYiYyAAAEJUlEQVR4nL2ZP2tUQRTFtzYq+QKWFimECAEVsiFsRERFEAULEZutRBstFFJFG0EEu3SmEEHQSiMipNRCBCvt/BIWWnvgrIe7d+7cN29XA4fH+7dvfpx7Z+bO7ODUytGahieWnEarx6xOry1TZ9a9eN+9L7nPhq0P5iGziO1Y+00muL5Y/4asBqew5kwh1n/0rEwyOrd/ZEkQz22sWCVwIVkIVyVLsGpApXrxNZElWPTDEVw8e/LyhVUK51CJ2LcTeLI8tyyTpUnUCBeQ1QLvyGz41Oq1KxvQ+Pp5yp1Djs8FtyOajVjOJ8d0fOnIrfElCuchn0Jcg2PEuslsvlurLJOlge7evArxBDdDvjKyNedisgRLTOQQjSOThFiDqwU0IAuxnFVocvPODejB/TGOoHFH3ocSuLBDVMnKnmjdklVs+/HWbYg0uIRoHu7wkeWzcMy5PKYD+6zEYspbLMsEbT+5hyNoeEky3ucj8Tm4JKaezMnGkV90WGzbktnz59tb9gULpw7hYurgYrJaHB0WmrcEn/de6PzVziP7VHDMuTCm3WQu8W0chbX35hlaRfPU7sunXz+9fXhgAUecQ7yPd/Cmwmo7hGzrQVZmmI2j3IJDZBLWzsHDOH7/8oE3Ibwj5wRX2qaxd4rM1QJuALMZJsPkFoAgoECWjKJ/dM7GVF1BI0homyezk2OZYTJMEQTBj28fifVufUQ43CGcIivbymyz8+kUmSsBwsHChlJYELGQSY4MQSScIyOc7aRJQCdkfKDaq0wyF0prGDhqZKFtPchUHCuUIiMTv2hDKSwZJjIH57JNX8OXCdePTCMZfs/GCAQOCK2Ghv3+9bO0jb0El/gh+fjBGcnaPUOThxY3FxbfL6+9pnCOOy2eNUVTeebIbJ65jsk0cnAOa9480wq2Vw9Q3wSH4IglMkRQZLW+6Qrd2cczR0Y4OUcmaobxLCOrTZrJSGv5FMRkpC3LoXgOaCk03LzJqRD2aH60NDaInFsTw7J5s2VGL0sgDgEKq+BUa8gt1ho2w2q1RjdZuCoJyw1N7ao4LFM5l89bn4W2hXC27oAYOzGVWGVNG+Z+R7Xdsg6wfCwSXZXr1gGNhk3WTjUyuxToXKRQCKJjqi1P8rXTFFm4qqstg8uFHQW37KWYHFY5upZJNllvlg/CgTdco2s9DJ8wT+No15gta/QQq2lfo4Rz+xokgEkgw1FAlskGMcfqJhtG2wi1vSCIPrG2yfeCGjfSmnapLFzJJwlFKpncZFgzrMfOnots456j3RbthdVEVnZYt0/LjVm7Sev2aVlc5UzDfAd5+Hfjz54kfPn2tqplN0y2YPXYdQ/5RtGfYr3+C6thdfxTkSAmM0c7UI2piUw/bszCRqBOrCbPcqyZ1dloE1nZP2amaWHqTTaPfy43WvQHKgVsHTk7S5AAAAAASUVORK5CYII=');
     const MASK: TImage = ImageFromString('IMG:AQAAACMAAAAjAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAwCSwHAAAAABqTJwABAAAA8OdqAAEAAACArxUHAAAAAFD8GQgAAAAA0AcNBwAAAABQ/BkIAAAAAGs/AQABAAAAEA0dBwAAAAC7BwEAAQAAALjT+gUAAAAAIpAnAAEAAACQZB0HAAAAAFmhAAABiVBORw0KGgoAAAANSUhEUgAAACMAAAAjCAIAAACRuyQOAAAACXBIWXMAAAAAAAAAAACdYiYyAAAABnRSTlMAAAAAAABupgeRAAAAbklEQVR4nO3WwQrAIAwD0O7/f9rjYGpbZxOxNHgT8k5iROTxHSXeht/AKhnGmFiYYXrxzAyDMEMMxfQYkPlgdAmaVyIkq1SpVG4M7/Vmk+j/Exo7tyN424i696gblrrLdzytTblbxYwq/dpDuhoaXQABAktavwEAAAAASUVORK5CYII=');
@@ -235,6 +242,25 @@ begin
     Self.Sines[q] := Trunc(Sin(q * TAU / TCompassDial.TURN) * 65536);
     Self.Cosines[q] := Trunc(Cos(q * TAU / TCompassDial.TURN) * 65536);
   end;
+
+  // The minimap's disk, px right and down of its centre, a row at a time.
+  SetLength(Self.Disk, Sqr(2 * TCompassDial.FIT_RADIUS + 1));
+  q := 0;
+  for y := -TCompassDial.FIT_RADIUS to TCompassDial.FIT_RADIUS do
+    for x := -TCompassDial.FIT_RADIUS to TCompassDial.FIT_RADIUS do
+      if x * x + y * y <= Sqr(TCompassDial.FIT_RADIUS) then
+      begin
+        Self.Disk[q] := Point(x, y);
+        Inc(q);
+      end;
+  SetLength(Self.Disk, q);
+  SetLength(Self.FX, q);
+  SetLength(Self.FY, q);
+  for q := 0 to High(Self.Disk) do
+  begin
+    Self.FX[q] := Self.Disk[q].X;
+    Self.FY[q] := Self.Disk[q].Y;
+  end;
 end;
 
 // The seen pixels' colours on screen, about the compass circle's centre.
@@ -277,6 +303,7 @@ var
   d, turns: Integer;
 begin
   Self.Cached := False;
+  Self.Fitted := False;
   for d := 0 to TCompassDial.TURN div 2 do
   begin
     if Self.Draws(q + d, screen) then
@@ -312,6 +339,118 @@ var
 begin
   mid := (Self.Lo + Self.Hi) / 2;
   Result := (mid - Floor(mid / TCompassDial.TURN) * TCompassDial.TURN) * TAU / TCompassDial.TURN;
+end;
+
+// Simba-AI fork (FORK.md 7, #421, ADR-0014): the minimap fit, after Simba-AI's tools/cache_census/minimap_match.py.
+
+// The minimap fit's score at q/16384 of a turn: the disk's pixels, every stride-th, whose map pixel, turned
+// by the client's routine (drawMinimap: the dial's arithmetic on the map, 4 px a tile) about the map's
+// pixel (col, row), is within FIT_TOL of the screen's on each channel.
+function TCompassDial.FitScore(constref map: TIntegerMatrix; col, row, q, stride: Integer; constref screen: TColorArray): Integer;
+var
+  i, s, c, a, b: Integer;
+  fx, fy: TIntegerArray;
+begin
+  Result := 0;
+  q := q and (TCompassDial.TURN - 1);
+  s := Self.Sines[q];
+  c := Self.Cosines[q];
+  col := col shl 16;
+  row := row shl 16;
+  fx := Self.FX;
+  fy := Self.FY;
+  i := 0;
+  while i <= High(screen) do
+  begin
+    a := map[(row + fy[i] * c - fx[i] * s) shr 16][(col + fx[i] * c + fy[i] * s) shr 16];
+    b := screen[i];
+    if (Abs((a and $FF) - (b and $FF)) <= TCompassDial.FIT_TOL) and
+       (Abs(((a shr 8) and $FF) - ((b shr 8) and $FF)) <= TCompassDial.FIT_TOL) and
+       (Abs(((a shr 16) and $FF) - ((b shr 16) and $FF)) <= TCompassDial.FIT_TOL) then
+      Inc(Result);
+    i += stride;
+  end;
+end;
+
+// Does the turn about (col, row) score above the turn about each of its 8 neighbours at q? A still
+// player's minimap turns about the pixel (2, 2) of its tile; a walking player's 1 to 3 px from it.
+function TCompassDial.FitCentred(constref map: TIntegerMatrix; col, row, q, stride: Integer; constref screen: TColorArray): Boolean;
+var
+  x, y, centred: Integer;
+begin
+  centred := Self.FitScore(map, col, row, q, stride, screen);
+  for y := -1 to 1 do
+    for x := -1 to 1 do
+      if ((x <> 0) or (y <> 0)) and (Self.FitScore(map, col + x, row + y, q, stride, screen) >= centred) then
+        Exit(False);
+  Result := True;
+end;
+
+// The minimap fit inside the kept run: map is the loaded map image, centre the pixel (2, 2) of the
+// player's tile on it, screen the minimap's centre. The centre check first, at the run's middle on every
+// 4th pixel: a walking player fails it, and the next call tries again. Then the run's every FIT_STEP-th
+// angle on every 4th pixel, and from the best outward, on every pixel, to its run of best angles; that run
+// is kept when over half the disk matches and the centre check holds at it on every pixel. Measured on 214
+// band frames: the true centre passes on 207, a centre 1 or 2 px off on 1 of 1,712 (Simba-AI #421).
+procedure TCompassDial.Fit(map: TImage; centre, screen: TPoint);
+var
+  m, best, score, q, a, b: Integer;
+  crop: TIntegerMatrix;
+  seen: TColorArray;
+begin
+  m := TCompassDial.FIT_RADIUS + 4;
+  crop := map.ToMatrix([centre.X - m, centre.Y - m, centre.X + m, centre.Y + m]);
+  seen := Target.GetColors(Self.Disk.Offset(screen));
+  if not Self.FitCentred(crop, m, m, (Self.Lo + Self.Hi) div 2, 4, seen) then
+    Exit;
+  Self.Fitted := True;
+
+  best := -1;
+  q := Self.Lo;
+  while q <= Self.Hi do
+  begin
+    score := Self.FitScore(crop, m, m, q, 4, seen);
+    if score > best then
+    begin
+      best := score;
+      a := q;
+    end;
+    q += TCompassDial.FIT_STEP;
+  end;
+
+  // Up the slope while the score rises, then across the run of equal best, on every pixel.
+  best := Self.FitScore(crop, m, m, a, 1, seen);
+  b := a;
+  while a > Self.Lo do
+  begin
+    score := Self.FitScore(crop, m, m, a - 1, 1, seen);
+    if score < best then
+      Break;
+    if score > best then
+    begin
+      best := score;
+      b := a - 1;
+    end;
+    Dec(a);
+  end;
+  while b < Self.Hi do
+  begin
+    score := Self.FitScore(crop, m, m, b + 1, 1, seen);
+    if score < best then
+      Break;
+    if score > best then
+    begin
+      best := score;
+      a := b + 1;
+    end;
+    Inc(b);
+  end;
+
+  if (best * 2 < Length(seen)) or not Self.FitCentred(crop, m, m, (a + b) div 2, 1, seen) then
+    Exit;
+  q := a div TCompassDial.TURN * TCompassDial.TURN;
+  Self.Lo := a - q;
+  Self.Hi := b - q;
 end;
 
 
@@ -380,6 +519,22 @@ begin
       Exit;
   end;
   Result := Self.Compass.Dial.Radians();
+end;
+
+// Simba-AI fork (FORK.md 7, #421, ADR-0014): the minimap fit inside a dial band, for Map.Position once it
+// has the position: map is its loaded map image, bounds the player's region on it, centre the pixel (2, 2)
+// of the player's tile. Once a kept run, in the resizable classic layout only, and only where the turned
+// disk stays inside the region's box on the image, where no other region's map sits.
+procedure TMinimap.FitCompass(map: TImage; bounds: TBox; centre: TPoint);
+const
+  M: Integer = TCompassDial.FIT_RADIUS + 4;
+begin
+  if (Client.Mode <> EMode.RESIZABLE) or not Self.Compass.Dial.Cached or Self.Compass.Dial.Fitted or
+     (Self.Compass.Dial.Hi - Self.Compass.Dial.Lo + 1 < TCompassDial.FIT_BAND) then
+    Exit;
+  if (centre.X - M < bounds.X1) or (centre.Y - M < bounds.Y1) or (centre.X + M >= bounds.X2) or (centre.Y + M >= bounds.Y2) then
+    Exit;
+  Self.Compass.Dial.Fit(map, centre, Self.Center);
 end;
 
 property TMinimap.CompassRadians(radians: Single): Boolean;
