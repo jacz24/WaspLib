@@ -721,6 +721,12 @@ begin
     Inc(nearest);
   end;
 
+  // Simba-AI fork (FORK.md 8, #446): the loop ran to the last point, so no point ahead is walkable: no
+  // advance, so GetNextStep counts a fail and its fallback can turn the main-screen walk off. Stock set the
+  // index on the last point, and WalkPath looped with no click.
+  if (nearest = High(Self._Path)) and (nearest > Self._Index) then
+    Exit(False);
+
   furthest := nearest;
   while furthest < High(Self._Path) do
   begin
