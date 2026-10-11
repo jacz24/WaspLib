@@ -743,11 +743,16 @@ begin
 end;
 
 function TWalker.GetNextStep(out index: Integer; out radians: Double; me: TPoint; fails: Integer; debug: Boolean): Integer;
+var
+  mmPoint: TPoint;
 begin
   if debug then
     Self.DebugPath(index, me);
 
-  if index = High(Self._Path) then
+  // Simba-AI fork (FORK.md 9, #446): the last point gives 0 at once only while it is walkable. Out of view
+  // (the player stopped short of it, or the camera turned) it counts a fail as any step does, so the
+  // fallback can run. Stock gave 0, _WalkStepHelper exited with no click, and WalkPath looped.
+  if (index = High(Self._Path)) and Self.IsWalkable(Self._Path[index], me, mmPoint, radians) then
     Exit(0);
 
   if Self._AdvancePath(index, me, radians) then
