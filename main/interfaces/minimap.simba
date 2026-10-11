@@ -27,7 +27,7 @@ type
   // last read's run of 1/16384 turns that draws every seen pixel, Lo in 0..TURN-1; Cached keeps it for the
   // next read; Missed holds the WARN line back until a read matches again. Disk (FX, FY) is the minimap's
   // 72 px disk for the minimap fit (FORK.md 7), Fitted marks a kept run the fit has narrowed, and Rejected
-  // is the map pixel where the first climb of a fit the kept run rejected ended (FORK.md 10).
+  // is the map pixel where the first climb ended of the last fit that failed under the kept run (FORK.md 10).
   TCompassDial = record
     Sprite: TIntegerMatrix;
     Seen, Disk: TPointArray;
@@ -396,7 +396,7 @@ end;
 
 // Simba-AI fork (FORK.md 10, #436): from (col, row) at q, on every FIT_STRIDE-th pixel, to the best of the
 // 8 neighbours while one scores above, at most FIT_CLIMB px from the crop's middle (m, m). False on a tie,
-// or on a step past FIT_CLIMB. A still player's climb ends where it starts, after today's 9 scores.
+// or on a step past FIT_CLIMB. A still player's climb ends where it starts, after the old check's 9 scores.
 function TCompassDial.FitClimb(constref map: TIntegerMatrix; m, q: Integer; var col, row: Integer; constref screen: TColorArray): Boolean;
 var
   x, y, score, centred, best, bx, by: Integer;
@@ -406,16 +406,17 @@ begin
     best := -1;
     for y := -1 to 1 do
       for x := -1 to 1 do
-        if (x <> 0) or (y <> 0) then
+      begin
+        if (x = 0) and (y = 0) then
+          Continue;
+        score := Self.FitScore(map, col + x, row + y, q, TCompassDial.FIT_STRIDE, screen);
+        if score > best then
         begin
-          score := Self.FitScore(map, col + x, row + y, q, TCompassDial.FIT_STRIDE, screen);
-          if score > best then
-          begin
-            best := score;
-            bx := col + x;
-            by := row + y;
-          end;
+          best := score;
+          bx := col + x;
+          by := row + y;
         end;
+      end;
     if best < centred then
       Exit(True);
     if (best = centred) or (Abs(bx - m) > TCompassDial.FIT_CLIMB) or (Abs(by - m) > TCompassDial.FIT_CLIMB) then
@@ -482,7 +483,7 @@ end;
 // centre. If the second climb moved, the angles are taken again. The run is kept when over half the disk
 // matches and the centre scores above its 8 neighbours at it on every pixel. Any other way out leaves the
 // run, and the next call tries again; a call whose first climb ends where a rejected one did stops there.
-// Measured on 3,697 frames (Simba-AI #436): the centre and the angle of every moving frame, and 215 of 218
+// Measured on 3,694 frames (Simba-AI #436): the centre and the angle of every moving frame, and 215 of 218
 // still band frames.
 procedure TCompassDial.Fit(map: TImage; centre, screen: TPoint);
 var
