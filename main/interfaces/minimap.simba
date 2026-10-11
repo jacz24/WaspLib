@@ -26,25 +26,28 @@ type
   // under the minimap frame 1177 (Simba-AI simba-kb/osrs/camera-projection.md section 12). Lo..Hi is the
   // last read's run of 1/16384 turns that draws every seen pixel, Lo in 0..TURN-1; Cached keeps it for the
   // next read; Missed holds the WARN line back until a read matches again. Disk (FX, FY) is the minimap's
-  // 72 px disk for the minimap fit (FORK.md 7), and Fitted marks a kept run the fit has narrowed.
+  // 72 px disk for the minimap fit (FORK.md 7), Fitted marks a kept run the fit has narrowed, and Rejected
+  // is the map pixel where the first climb of a fit the kept run rejected ended (FORK.md 10).
   TCompassDial = record
     Sprite: TIntegerMatrix;
     Seen, Disk: TPointArray;
     DX, DY, Sines, Cosines, FX, FY: TIntegerArray;
     Lo, Hi: Integer;
+    Rejected: TPoint;
     Cached, Missed, Fitted: Boolean;
 
     const TURN: Integer = 16384;
     // The minimap fit (Simba-AI camera-projection.md section 13): the disk's radius; the map crop's half
-    // side, the radius and 4 (the centre check's 1 px, and the truncation's); the tolerance of a colour per
-    // channel; the shortest run that is a band (a bound over 0.4 degrees); the coarse step in angles; the
-    // step in pixels of the cheap passes.
+    // side, the radius, the climb's 3 px and 4 (the centre check's 1 px, and the truncation's); the
+    // tolerance of a colour per channel; the shortest run that is a band (a bound over 0.4 degrees); the
+    // coarse step in angles; the step in pixels of the cheap passes; the farthest a climb moves the centre.
     const FIT_RADIUS: Integer = 72;
-    const FIT_CROP: Integer = 76;
+    const FIT_CROP: Integer = 79;
     const FIT_TOL: Integer = 3;
     const FIT_BAND: Integer = 36;
     const FIT_STEP: Integer = 8;
     const FIT_STRIDE: Integer = 4;
+    const FIT_CLIMB: Integer = 3;
     // Each image is SaveToString of Simba-AI's tools/cache_census/data/compass/<id>.png (SpriteDump of the cache).
     const DIAL: TImage = ImageFromString('IMG:AQAAADMAAAAzAAAAAAAAALjT+gUAAAAAkjQnAAEAAABQxhAHAAAAADAokQgAAAAA8OdqAAEAAAAwCSwHAAAAAFD8GQgAAAAAQNwnBwAAAABQ/BkIAAAAAGs/AQABAAAABAAAAAAAAADp/UwAAQAAALjT+gUAAAAAIpAnAAEAAAAwKJEIAAAAAFmhAAABiVBORw0KGgoAAAANSUhEUgAAADMAAAAzCAIAAAC1w6d9AAAACXBIWXMAAAAAAAAAAACdYiYyAAAEJUlEQVR4nL2ZP2tUQRTFtzYq+QKWFimECAEVsiFsRERFEAULEZutRBstFFJFG0EEu3SmEEHQSiMipNRCBCvt/BIWWnvgrIe7d+7cN29XA4fH+7dvfpx7Z+bO7ODUytGahieWnEarx6xOry1TZ9a9eN+9L7nPhq0P5iGziO1Y+00muL5Y/4asBqew5kwh1n/0rEwyOrd/ZEkQz22sWCVwIVkIVyVLsGpApXrxNZElWPTDEVw8e/LyhVUK51CJ2LcTeLI8tyyTpUnUCBeQ1QLvyGz41Oq1KxvQ+Pp5yp1Djs8FtyOajVjOJ8d0fOnIrfElCuchn0Jcg2PEuslsvlurLJOlge7evArxBDdDvjKyNedisgRLTOQQjSOThFiDqwU0IAuxnFVocvPODejB/TGOoHFH3ocSuLBDVMnKnmjdklVs+/HWbYg0uIRoHu7wkeWzcMy5PKYD+6zEYspbLMsEbT+5hyNoeEky3ucj8Tm4JKaezMnGkV90WGzbktnz59tb9gULpw7hYurgYrJaHB0WmrcEn/de6PzVziP7VHDMuTCm3WQu8W0chbX35hlaRfPU7sunXz+9fXhgAUecQ7yPd/Cmwmo7hGzrQVZmmI2j3IJDZBLWzsHDOH7/8oE3Ibwj5wRX2qaxd4rM1QJuALMZJsPkFoAgoECWjKJ/dM7GVF1BI0homyezk2OZYTJMEQTBj28fifVufUQ43CGcIivbymyz8+kUmSsBwsHChlJYELGQSY4MQSScIyOc7aRJQCdkfKDaq0wyF0prGDhqZKFtPchUHCuUIiMTv2hDKSwZJjIH57JNX8OXCdePTCMZfs/GCAQOCK2Ghv3+9bO0jb0El/gh+fjBGcnaPUOThxY3FxbfL6+9pnCOOy2eNUVTeebIbJ65jsk0cnAOa9480wq2Vw9Q3wSH4IglMkRQZLW+6Qrd2cczR0Y4OUcmaobxLCOrTZrJSGv5FMRkpC3LoXgOaCk03LzJqRD2aH60NDaInFsTw7J5s2VGL0sgDgEKq+BUa8gt1ho2w2q1RjdZuCoJyw1N7ao4LFM5l89bn4W2hXC27oAYOzGVWGVNG+Z+R7Xdsg6wfCwSXZXr1gGNhk3WTjUyuxToXKRQCKJjqi1P8rXTFFm4qqstg8uFHQW37KWYHFY5upZJNllvlg/CgTdco2s9DJ8wT+No15gta/QQq2lfo4Rz+xokgEkgw1FAlskGMcfqJhtG2wi1vSCIPrG2yfeCGjfSmnapLFzJJwlFKpncZFgzrMfOnots456j3RbthdVEVnZYt0/LjVm7Sev2aVlc5UzDfAd5+Hfjz54kfPn2tqplN0y2YPXYdQ/5RtGfYr3+C6thdfxTkSAmM0c7UI2piUw/bszCRqBOrCbPcqyZ1dloE1nZP2amaWHqTTaPfy43WvQHKgVsHTk7S5AAAAAASUVORK5CYII=');
     const MASK: TImage = ImageFromString('IMG:AQAAACMAAAAjAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAwCSwHAAAAABqTJwABAAAA8OdqAAEAAACArxUHAAAAAFD8GQgAAAAA0AcNBwAAAABQ/BkIAAAAAGs/AQABAAAAEA0dBwAAAAC7BwEAAQAAALjT+gUAAAAAIpAnAAEAAACQZB0HAAAAAFmhAAABiVBORw0KGgoAAAANSUhEUgAAACMAAAAjCAIAAACRuyQOAAAACXBIWXMAAAAAAAAAAACdYiYyAAAABnRSTlMAAAAAAABupgeRAAAAbklEQVR4nO3WwQrAIAwD0O7/f9rjYGpbZxOxNHgT8k5iROTxHSXeht/AKhnGmFiYYXrxzAyDMEMMxfQYkPlgdAmaVyIkq1SpVG4M7/Vmk+j/Exo7tyN424i696gblrrLdzytTblbxYwq/dpDuhoaXQABAktavwEAAAAASUVORK5CYII=');
@@ -308,6 +311,7 @@ var
 begin
   Self.Cached := False;
   Self.Fitted := False;
+  Self.Rejected := [0, 0];
   for d := 0 to TCompassDial.TURN div 2 do
   begin
     if Self.Draws(q + d, screen) then
@@ -390,16 +394,100 @@ begin
   Result := True;
 end;
 
+// Simba-AI fork (FORK.md 10, #436): from (col, row) at q, on every FIT_STRIDE-th pixel, to the best of the
+// 8 neighbours while one scores above, at most FIT_CLIMB px from the crop's middle (m, m). False on a tie,
+// or on a step past FIT_CLIMB. A still player's climb ends where it starts, after today's 9 scores.
+function TCompassDial.FitClimb(constref map: TIntegerMatrix; m, q: Integer; var col, row: Integer; constref screen: TColorArray): Boolean;
+var
+  x, y, score, centred, best, bx, by: Integer;
+begin
+  centred := Self.FitScore(map, col, row, q, TCompassDial.FIT_STRIDE, screen);
+  repeat
+    best := -1;
+    for y := -1 to 1 do
+      for x := -1 to 1 do
+        if (x <> 0) or (y <> 0) then
+        begin
+          score := Self.FitScore(map, col + x, row + y, q, TCompassDial.FIT_STRIDE, screen);
+          if score > best then
+          begin
+            best := score;
+            bx := col + x;
+            by := row + y;
+          end;
+        end;
+    if best < centred then
+      Exit(True);
+    if (best = centred) or (Abs(bx - m) > TCompassDial.FIT_CLIMB) or (Abs(by - m) > TCompassDial.FIT_CLIMB) then
+      Exit(False);
+    col := bx;
+    row := by;
+    centred := best;
+  until False;
+end;
+
+// The kept run's best angles about (col, row): its every FIT_STEP-th angle on every FIT_STRIDE-th pixel,
+// then from the best outward, on every pixel, to its run of best angles first..last. Their score.
+function TCompassDial.FitRun(constref map: TIntegerMatrix; col, row: Integer; constref screen: TColorArray; out first, last: Integer): Integer;
+var
+  q, score: Integer;
+begin
+  Result := -1;
+  q := Self.Lo;
+  while q <= Self.Hi do
+  begin
+    score := Self.FitScore(map, col, row, q, TCompassDial.FIT_STRIDE, screen);
+    if score > Result then
+    begin
+      Result := score;
+      first := q;
+    end;
+    q += TCompassDial.FIT_STEP;
+  end;
+
+  // Up the slope while the score rises, then across the run of equal best, on every pixel.
+  Result := Self.FitScore(map, col, row, first, 1, screen);
+  last := first;
+  while first > Self.Lo do
+  begin
+    score := Self.FitScore(map, col, row, first - 1, 1, screen);
+    if score < Result then
+      Break;
+    if score > Result then
+    begin
+      Result := score;
+      last := first - 1;
+    end;
+    Dec(first);
+  end;
+  while last < Self.Hi do
+  begin
+    score := Self.FitScore(map, col, row, last + 1, 1, screen);
+    if score < Result then
+      Break;
+    if score > Result then
+    begin
+      Result := score;
+      first := last + 1;
+    end;
+    Inc(last);
+  end;
+end;
+
 // The minimap fit inside the kept run, when that run is a band and has no fit: map is the loaded map
-// image, centre the pixel (2, 2) of the player's tile on it, screen the minimap's centre. The centre check
-// first, at the run's middle on every FIT_STRIDE-th pixel: a walking player fails it. Then the run's every
-// FIT_STEP-th angle on every FIT_STRIDE-th pixel, and from the best outward, on every pixel, to its run of
-// best angles; that run is kept when over half the disk matches and the centre check holds at it on every
-// pixel. Any other way out leaves the run, and the next call tries again. Measured on 214 band frames: the
-// true centre passes on 207, a centre 1 or 2 px off on 1 of 1,712 (Simba-AI #421).
+// image, centre the pixel (2, 2) of the player's tile on it, screen the minimap's centre. A still player's
+// minimap turns about that pixel, a walking player's about a point 1 to 3 px from it, so the fit climbs to
+// the turn's centre at the run's middle (FitClimb), takes the run's best angles there (FitRun), and climbs
+// again at those angles: at the run's middle, up to 1.68 degrees off, the score can peak 1 px beside the
+// centre. If the second climb moved, the angles are taken again. The run is kept when over half the disk
+// matches and the centre scores above its 8 neighbours at it on every pixel. Any other way out leaves the
+// run, and the next call tries again; a call whose first climb ends where a rejected one did stops there.
+// Measured on 3,697 frames (Simba-AI #436): the centre and the angle of every moving frame, and 215 of 218
+// still band frames.
 procedure TCompassDial.Fit(map: TImage; centre, screen: TPoint);
 var
-  m, best, score, q, first, last, turns: Integer;
+  m, col, row, best, first, last, turns: Integer;
+  climbed: TPoint;
   crop: TIntegerMatrix;
   seen: TColorArray;
 begin
@@ -408,52 +496,28 @@ begin
   m := TCompassDial.FIT_CROP;
   crop := map.ToMatrix([centre.X - m, centre.Y - m, centre.X + m, centre.Y + m]);
   seen := Target.GetColors(Self.Disk.Offset(screen));
-  if not Self.FitCentred(crop, m, m, (Self.Lo + Self.Hi) div 2, TCompassDial.FIT_STRIDE, seen) then
+  col := m;
+  row := m;
+  if not Self.FitClimb(crop, m, (Self.Lo + Self.Hi) div 2, col, row, seen) then
+    Exit;
+  climbed := [centre.X + col - m, centre.Y + row - m];
+  if (climbed.X = Self.Rejected.X) and (climbed.Y = Self.Rejected.Y) then
     Exit;
 
-  best := -1;
-  q := Self.Lo;
-  while q <= Self.Hi do
+  best := Self.FitRun(crop, col, row, seen, first, last);
+  if not Self.FitClimb(crop, m, (first + last) div 2, col, row, seen) then
   begin
-    score := Self.FitScore(crop, m, m, q, TCompassDial.FIT_STRIDE, seen);
-    if score > best then
-    begin
-      best := score;
-      first := q;
-    end;
-    q += TCompassDial.FIT_STEP;
-  end;
-
-  // Up the slope while the score rises, then across the run of equal best, on every pixel.
-  best := Self.FitScore(crop, m, m, first, 1, seen);
-  last := first;
-  while first > Self.Lo do
-  begin
-    score := Self.FitScore(crop, m, m, first - 1, 1, seen);
-    if score < best then
-      Break;
-    if score > best then
-    begin
-      best := score;
-      last := first - 1;
-    end;
-    Dec(first);
-  end;
-  while last < Self.Hi do
-  begin
-    score := Self.FitScore(crop, m, m, last + 1, 1, seen);
-    if score < best then
-      Break;
-    if score > best then
-    begin
-      best := score;
-      first := last + 1;
-    end;
-    Inc(last);
-  end;
-
-  if (best * 2 < Length(seen)) or not Self.FitCentred(crop, m, m, (first + last) div 2, 1, seen) then
+    Self.Rejected := climbed;
     Exit;
+  end;
+  if (centre.X + col - m <> climbed.X) or (centre.Y + row - m <> climbed.Y) then
+    best := Self.FitRun(crop, col, row, seen, first, last);
+
+  if (best * 2 < Length(seen)) or not Self.FitCentred(crop, col, row, (first + last) div 2, 1, seen) then
+  begin
+    Self.Rejected := climbed;
+    Exit;
+  end;
   turns := first div TCompassDial.TURN * TCompassDial.TURN;
   Self.Lo := first - turns;
   Self.Hi := last - turns;
@@ -530,8 +594,8 @@ end;
 
 // Simba-AI fork (FORK.md 7, #421, ADR-0014): the minimap fit inside a dial band, for Map.Position once it
 // has the position: map is its loaded map image, bounds the player's region on it, centre the pixel (2, 2)
-// of the player's tile. In the resizable classic layout only, and only where the map crop stays inside the
-// region's box on the image, where no other region's map sits.
+// of the player's tile, where the fit's climb starts (FORK.md 10). In the resizable classic layout only, and
+// only where the map crop stays inside the region's box on the image, where no other region's map sits.
 procedure TMinimap.FitCompass(map: TImage; bounds: TBox; centre: TPoint);
 const
   M: Integer = TCompassDial.FIT_CROP;
