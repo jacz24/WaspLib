@@ -166,17 +166,22 @@ procedure TMapLoader.Unzipped(constref result: TASyncUnzipResult);
 var
   name, msg, bin: String;
 begin
-  // Simba-AI fork (#466): the unzip ran in a folder of its own (Extract), so
-  // a failure deletes that folder only, never the bins already in the cache.
+  // Simba-AI fork (FORK.md 11, #466): no folder of ours, nothing to move or
+  // delete; DirDelete('') would delete the current directory.
+  if Self.UnzipDir = '' then
+    Exit;
+
+  // Simba-AI fork (FORK.md 11, #466): the unzip ran in a folder of its own
+  // (Extract), so a failure deletes that folder only, never the bins already
+  // in the cache.
   if not result.Success then
   begin
-    if Self.UnzipDir <> '' then
-      DirDelete(Self.UnzipDir, False);
+    DirDelete(Self.UnzipDir, False);
     raise GetDebugLn('MapLoader', result.Exception);
   end;
 
-  // Simba-AI fork (#466): a bin takes its final name only now, whole. A bin
-  // already there stays: another script's unzip finished first.
+  // Simba-AI fork (FORK.md 11, #466): a bin takes its final name only now,
+  // whole. A bin already there stays: another script's unzip finished first.
   for bin in Self.BINS do
     if not FileExists(Self.CacheDir + bin) and
        not FileRename(Self.UnzipDir + bin, Self.CacheDir + bin) and
@@ -193,29 +198,34 @@ begin
   Self.Unzipping := False;
 end;
 
-// Simba-AI fork (#466): unzip into a folder of our own, named for its start
-// time and this process, and let Unzipped move the bins in. Stock unzipped
-// straight into the cache, so a script that ended during the unzip left a
-// cut bin that every later Init trusted (FileExists only), and a map load
-// past the cut stopped on an access violation in GetFile.
+// Simba-AI fork (FORK.md 11, #466): unzip into a folder of our own, named for
+// its start time and this process, and let Unzipped move the bins in. Stock
+// unzipped straight into the cache, so a script that ended during the unzip
+// left a cut bin that every later Init trusted (FileExists only), and a map
+// load past the cut stopped on an access violation in GetFile.
 procedure TMapLoader.Extract();
 var
-  path, tmp: String;
+  path, name, bin: String;
   unixNow: Int64;
 begin
-  unixNow := TDateTime.CreateFromUnix().ToUnix();
+  // One unzip at a time: a second would move bins the first still writes.
+  if Self.Unzipping then
+    Exit;
+
+  unixNow := Time() div 1000;
 
   // A folder ten minutes old is a dead script's: a live unzip ends in
-  // seconds, and Setup stops waiting for one after four minutes.
+  // seconds, and Setup stops waiting for one after four minutes. A name
+  // whose time does not parse reads as 0, so it goes too.
   for path in DirList(Self.CacheDir) do
   begin
-    tmp := PathExtractName(path);
-    if tmp.StartsWith('unzip-') and (unixNow - tmp.After('unzip-').Before('-').ToInt(0) > 10*60) then
+    name := PathExtractName(path);
+    if name.StartsWith('unzip-') and (unixNow - name.After('unzip-').Before('-').ToInt(0) > 10*60) then
       DirDelete(path, False);
   end;
 
-  for tmp in Self.BINS do
-    if not FileExists(Self.CacheDir + tmp) then
+  for bin in Self.BINS do
+    if not FileExists(Self.CacheDir + bin) then
     begin
       Self.UnzipDir := Self.CacheDir + 'unzip-' + ToStr(unixNow) + '-' + ToStr(GetProcessID()) + PATH_SEP;
       DirCreate(Self.UnzipDir);
@@ -269,7 +279,10 @@ begin
 
     if Self.Timeout.IsFinished then
     begin
-      DirDelete(Self.CacheDir, False);
+      // Simba-AI fork (FORK.md 11, #466): the unzip's own folder, never the
+      // version folder, whose bins other scripts may be reading.
+      if Self.UnzipDir <> '' then
+        DirDelete(Self.UnzipDir, False);
       raise GetDebugLn('MapLoader', 'Timed out unzipping map files.');
     end;
   end;
