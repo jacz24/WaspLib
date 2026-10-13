@@ -50,6 +50,7 @@ type
     Padding, Downscale: Integer;
 
     Unzipping: Boolean;
+    UnzipDir: String;
     Timeout: TCountDown;
     MapReader: array [ERSMap] of TResourceReader;
     const ZIP: String = WLEnv.AssetsDir + 'map' + PATH_SEP + 'mapdata.zip';
@@ -163,17 +164,66 @@ end;
 
 procedure TMapLoader.Unzipped(constref result: TASyncUnzipResult);
 var
-  name, msg: String;
+  name, msg, bin: String;
 begin
+  // Simba-AI fork (#466): the unzip ran in a folder of its own (Extract), so
+  // a failure deletes that folder only, never the bins already in the cache.
   if not result.Success then
   begin
-    DirDelete(Self.CacheDir, False);
+    if Self.UnzipDir <> '' then
+      DirDelete(Self.UnzipDir, False);
     raise GetDebugLn('MapLoader', result.Exception);
   end;
+
+  // Simba-AI fork (#466): a bin takes its final name only now, whole. A bin
+  // already there stays: another script's unzip finished first.
+  for bin in Self.BINS do
+    if not FileExists(Self.CacheDir + bin) and
+       not FileRename(Self.UnzipDir + bin, Self.CacheDir + bin) and
+       not FileExists(Self.CacheDir + bin) then
+    begin
+      DirDelete(Self.UnzipDir, False);
+      raise GetDebugLn('MapLoader', 'Failed to move ' + bin + ' into ' + Self.CacheDir);
+    end;
+  DirDelete(Self.UnzipDir, False);
+
   name := PathExtractName(result.ZipFile);
   msg := 'Finished async unzip of ' +  name + ' in ' + ToStr(Round(result.TimeUsed, 2)) + 'ms.';
   DebugLn('MapLoader', msg, ELogLevel.SUCCESS);
   Self.Unzipping := False;
+end;
+
+// Simba-AI fork (#466): unzip into a folder of our own, named for its start
+// time and this process, and let Unzipped move the bins in. Stock unzipped
+// straight into the cache, so a script that ended during the unzip left a
+// cut bin that every later Init trusted (FileExists only), and a map load
+// past the cut stopped on an access violation in GetFile.
+procedure TMapLoader.Extract();
+var
+  path, tmp: String;
+  unixNow: Int64;
+begin
+  unixNow := TDateTime.CreateFromUnix().ToUnix();
+
+  // A folder ten minutes old is a dead script's: a live unzip ends in
+  // seconds, and Setup stops waiting for one after four minutes.
+  for path in DirList(Self.CacheDir) do
+  begin
+    tmp := PathExtractName(path);
+    if tmp.StartsWith('unzip-') and (unixNow - tmp.After('unzip-').Before('-').ToInt(0) > 10*60) then
+      DirDelete(path, False);
+  end;
+
+  for tmp in Self.BINS do
+    if not FileExists(Self.CacheDir + tmp) then
+    begin
+      Self.UnzipDir := Self.CacheDir + 'unzip-' + ToStr(unixNow) + '-' + ToStr(GetProcessID()) + PATH_SEP;
+      DirCreate(Self.UnzipDir);
+      Self.Unzipping := True;
+      Self.Timeout.Start(4*MINUTE);
+      Async.FileUnZip(Self.ZIP, Self.UnzipDir, @Self.Unzipped);
+      Break;
+    end;
 end;
 
 procedure TMapLoader.Init();
@@ -196,14 +246,7 @@ begin
   if not DirCreate(Self.CacheDir) then
     raise GetDebugLn('MapLoader', 'Failed to create cache directory: ' + Self.CacheDir);
 
-  for tmp in Self.BINS do
-    if not FileExists(Self.CacheDir + tmp) then
-    begin
-      Self.Unzipping := True;
-      Self.Timeout.Start(4*MINUTE);
-      Async.FileUnZip(Self.ZIP, Self.CacheDir, @Self.Unzipped);
-      Break;
-    end;
+  Self.Extract();
 end;
 
 procedure TMapLoader.Setup(downscale: UInt32);
