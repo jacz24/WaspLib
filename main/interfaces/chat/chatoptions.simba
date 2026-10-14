@@ -133,7 +133,7 @@ end;
 
 
 
-// Simba-AI fork (FORK.md 12, Simba-AI #441): Locate looks for the text's own
+// Simba-AI fork (FORK.md 12, #441): Locate looks for the text's own
 // pixels, about 0.7 ms a call, where reading every line of the box took
 // about 180. Stock's one-argument `opts.Contains` matched whole lines only,
 // so it never saw the game's 'Please wait...'; this Locate does (the
@@ -211,9 +211,9 @@ end;
 
 
 
-// Simba-AI fork (FORK.md 12, Simba-AI #441): Locate, as ContainsContinue.
+// Simba-AI fork (FORK.md 12, #441): Locate, as ContainsContinue.
 // It needs every pixel of 'Congratulations' in dark blue, so a normal
-// continue page scores 0 (35 of 35 on Simba-AI #453's frames).
+// continue page scores 0 (35 of 35 on #453's frames).
 function TChat.LeveledUp(): Boolean;
 begin
   Result := OCR.Locate(Self.Bounds, 'Congratulations', [TFonts.DARK_BLUE], 0, Fonts.QUILL_8) > 0.95;
