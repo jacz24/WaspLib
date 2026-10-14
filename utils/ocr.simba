@@ -174,13 +174,33 @@ begin
 end;
 
 
+// Simba-AI fork (FORK.md 12, Simba-AI #441): the engine reads only where
+// the asked colours are. With none in the box it is not run; else it gets
+// their bounds padded by twice the font's glyph height plus 2, and the
+// matches are shifted back into the box. The engine matches a glyph only
+// where the glyph's pixels are lit, so no line lies outside the pad: on
+// 538 saved frames 7,532 of 7,532 reads were equal (Simba-AI #453), and a
+// read whose colours are absent fell from about 180 ms to 0.5 ms.
 function TOCR.RecognizeLines(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): TStringArray;
 var
   img: TImage;
+  lit: TPointArray;
+  b: TBox;
+  i: Integer;
 begin
   img := Target.GetImage(bounds);
   img.ReplaceColorBinary(False, colors, tolerance);
-  Result := Self.Engine.RecognizeLines(img, font);
+  lit := img.FindColor($FFFFFF, 0);
+  if lit = [] then
+  begin
+    Self.Engine.Matches := [];
+    Exit;
+  end;
+
+  b := lit.Bounds().Expand(2 * font.MaxGlyphHeight + 2, [0, 0, img.Width - 1, img.Height - 1]);
+  Result := Self.Engine.RecognizeLines(img.Copy(b), font);
+  for i := 0 to High(Self.Engine.Matches) do
+    Self.Engine.Matches[i].Bounds := Self.Engine.Matches[i].Bounds.Offset(b.TopLeft);
 end;
 
 
