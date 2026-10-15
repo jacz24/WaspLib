@@ -28,6 +28,14 @@ begin
     raise GetDebugLn('RemoteInput', 'Can''t get target window.');
 
   Self.Window := Target.Info.Window;
+  {$IFDEF DARWIN}
+  // Simba-AI fork (#487): on the Mac Simba's GetClassName is the window's owner name, and RuneLite blocks
+  // RIInject's task_for_pid, so the library comes in at RuneLite's start (tools/start_runelite_mac.ps1).
+  if Self.Window.GetClassName() <> 'RuneLite' then
+    Exit;
+
+  pid := Self.Window.GetPID();
+  {$ELSE}
   if Self.Window.GetClassName() <> 'SunAwtCanvas' then
     Exit;
 
@@ -44,6 +52,7 @@ begin
       );
     raise GetExceptionMessage();
   end;
+  {$ENDIF}
 
   timer.Start(2000);
   repeat
@@ -67,6 +76,9 @@ begin
   if Self.Target = nil then
   begin
     DebugLn('RemoteInput', 'Invalid target for RemoteInput, RemoteInput will not be used.', ELogLevel.WARN);
+    {$IFDEF DARWIN}
+    DebugLn('RemoteInput', 'On the Mac, start RuneLite with Simba-AI''s tools/start_runelite_mac.ps1.', ELogLevel.WARN);
+    {$ENDIF}
     Exit;
   end;
 
