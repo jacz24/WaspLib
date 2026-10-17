@@ -15,22 +15,26 @@ type
   end;
 
 
-procedure TLogger.Init();
+// Simba-AI fork (FORK.md 14, Simba-AI #404): past 100 entries in dir, the file
+// with the smallest creation time goes. Stock kept the largest, so it deleted
+// the newest log: in a parallel start, a running sibling's open log, and Init
+// raised. A failed delete is a warning: two starts can pick the same old log.
+procedure TLogger.DeleteOldestLog(dir: String); static;
 var
   files: TStringArray;
   i: Integer;
   date, oldest: TDateTime;
   filename: String;
 begin
-  Self.Path := WLEnv.LogsDir;
-
-  files := DirList(Self.Path);
+  files := DirList(dir);
   if Length(files) > 100 then
   begin
     for i := 0 to High(files) do
     begin
+      if not PathIsFile(files[i]) then
+        Continue;
       date := FileCreationTime(files[i]);
-      if date > oldest then
+      if (filename = '') or (date < oldest) then
       begin
         oldest := date;
         filename := files[i];
@@ -38,8 +42,20 @@ begin
     end;
 
     if FileExists(filename) and not FileDelete(filename) then
-      raise GetTimeStamp() + ':[Logger]: Failed to delete old log: ' + PathExtractName(filename);
+    begin
+      SetWriteColor($00FFFF);
+      WriteLn(GetTimeStamp() + ':[Logger]: Failed to delete old log: ' + PathExtractName(filename));
+      ResetWriteColor();
+    end;
   end;
+end;
+
+
+procedure TLogger.Init();
+begin
+  Self.Path := WLEnv.LogsDir;
+
+  TLogger.DeleteOldestLog(Self.Path);
 
   if not DirCreate(Self.Path) then
     raise GetTimeStamp() + ':[Logger]: Failed to create logs directory.';
