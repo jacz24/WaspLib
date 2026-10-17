@@ -16,9 +16,10 @@ type
 
 
 // Simba-AI fork (FORK.md 14, Simba-AI #404): past 100 entries in dir, the file
-// with the smallest creation time goes. Stock kept the largest, so it deleted
-// the newest log: in a parallel start, a running sibling's open log, and Init
-// raised. A failed delete is a warning: two starts can pick the same old log.
+// with the smallest FileCreationTime goes (on Unix st_ctime: the least recently
+// changed). Stock kept the largest, so it deleted the newest log: in a parallel
+// start, a running sibling's open log, and Init raised. A failed delete is a
+// warning: two starts can pick the same old log.
 procedure TLogger.DeleteOldestLog(dir: String); static;
 var
   files: TStringArray;
