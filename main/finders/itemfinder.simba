@@ -278,11 +278,13 @@ begin
     Result += Self.GetImage(id);
 end;
 
-// Simba-AI fork (FORK.md 15, Simba-AI #459): freeze the boxes' union, each box
-// at least 37 px wide as the compare reads it (imagecompare.simba:57-58), not
-// the whole client. Inside a caller's freeze, stock's whole freeze: there a
-// part freeze copies from the frozen data after it shrinks it, and on a window
-// target frees a pointer into it (Simba 146e4d67, simba.target.pas:1355-1384).
+// Simba-AI fork (FORK.md 15, Simba-AI #459): freeze the rows of the boxes'
+// union, each box at least 37 px wide as the compare reads it
+// (imagecompare.simba:57-58), not the whole client. From column 0: on an image
+// or RemoteInput target Simba copies whole rows from the area's left edge, so
+// an area on the last row with X1 > 0 would read past the buffer. Inside a
+// caller's freeze, stock's freeze: there a part freeze copies from the frozen
+// data after it shrinks it (Simba 146e4d67, simba.target.pas:1355-1384).
 procedure TItemFinder._FreezeBoxes(boxes: TBoxArray);
 var
   area: TBox;
@@ -295,6 +297,7 @@ begin
   end;
 
   area := boxes.Merge();
+  area.X1 := 0;
   for i := 0 to High(boxes) do
     area.X2 := Max(area.X2, boxes[i].X1 + 36);
   Target.FreezeImage(area);
