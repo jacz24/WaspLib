@@ -1063,23 +1063,26 @@ const
     [[$FEFEFE, $ECECEC], [$00F1FE, $00DFEC], [$0000FE, $0000EC]]  //OFFICIAL
   ];
 var
-  y,x: Integer;
-  color0, color1: TColor;
+  pt: TPoint;
+  color1: TColor;
 begin
-  color0 := COLORS[Client.Typ][dot][0];
   color1 := COLORS[Client.Typ][dot][1];
 
-  for y := 0 to img.Height-2 do
-    for x := 0 to img.Width-2 do
-    begin
-      if img.Pixel[x,y] <> color0 then
-        Continue;
-      if img.Pixel[x+1,y] <> color1 then
-        Continue;
-      //TODO: maybe confirm dot shadow or confirm other dots in range.
-      //Some dots are detected twice, especially players.
-      Result += [x + offset.X, y + offset.Y-1];
-    end;
+  // Simba-AI fork (FORK.md 16, Simba-AI #461): the first colour by FindColor,
+  // in stock's loop range (no last column or row) and row-major order; the
+  // second colour checked on the hits only. Stock read every pixel in Lape.
+  // Under 2 px either way stock's range is empty, but FindColor's Clip would
+  // raise its -1 edge to 0 and scan it.
+  if (img.Width < 2) or (img.Height < 2) then
+    Exit;
+  for pt in img.FindColor(COLORS[Client.Typ][dot][0], 0, [0, 0, img.Width-2, img.Height-2]) do
+  begin
+    if img.Pixel[pt.X+1, pt.Y] <> color1 then
+      Continue;
+    //TODO: maybe confirm dot shadow or confirm other dots in range.
+    //Some dots are detected twice, especially players.
+    Result += [pt.X + offset.X, pt.Y + offset.Y-1];
+  end;
 end;
 
 function TMinimap.GetDots(dot: EDot; bounds: TBox): TPointArray;
