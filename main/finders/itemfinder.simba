@@ -278,6 +278,28 @@ begin
     Result += Self.GetImage(id);
 end;
 
+// Simba-AI fork (FORK.md 15, Simba-AI #459): freeze the boxes' union, each box
+// at least 37 px wide as the compare reads it (imagecompare.simba:57-58), not
+// the whole client. Inside a caller's freeze, stock's whole freeze: there a
+// part freeze copies from the frozen data after it shrinks it, and on a window
+// target frees a pointer into it (Simba 146e4d67, simba.target.pas:1355-1384).
+procedure TItemFinder._FreezeBoxes(boxes: TBoxArray);
+var
+  area: TBox;
+  i: Integer;
+begin
+  if Target.IsImageFrozen() then
+  begin
+    Target.FreezeImage();
+    Exit;
+  end;
+
+  area := boxes.Merge();
+  for i := 0 to High(boxes) do
+    area.X2 := Max(area.X2, boxes[i].X1 + 36);
+  Target.FreezeImage(area);
+end;
+
 
 function TItemFinder.FindAll(items: TItemArray; boxes: TBoxArray; maxToFind: Integer = 0): TImageMatchArray;
 var
@@ -293,7 +315,7 @@ begin
   for item in items do
     spread += item.Spread();
 
-  Target.FreezeImage();
+  Self._FreezeBoxes(boxes);
 
   for item in spread do
   begin
@@ -340,7 +362,7 @@ begin
   for item in items do
     spread += item.Spread();
 
-  Target.FreezeImage();
+  Self._FreezeBoxes(boxes);
 
   for item in spread do
   begin
@@ -390,7 +412,7 @@ var
   skip: TBooleanArray;
 begin
   SetLength(skip, Length(boxes));
-  Target.FreezeImage();
+  Self._FreezeBoxes(boxes);
 
   for item in items do
     spread += item.Spread();
