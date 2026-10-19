@@ -134,6 +134,49 @@ var
 {$ENDIF}
 
 
+// Simba-AI fork (#493): no OS input to a game client. When the target is a game client and no input
+// plugin paired, the input would be Simba's own, and RuneLite's client on Windows flags injected clicks
+// to the server (Simba-AI simba-kb/projects/input-capture-paths.md, question 3). WaspLibSetup stops
+// there, before any input, in place of stock's fallback. An unknown client (no game window) goes on.
+function TClient.UnpairedInputError(typ: EClient; kind: ETargetKind): String; static;
+begin
+  if typ = EClient.UNKNOWN then
+    Exit;
+  // An EIOS target's input goes through its plugin, as a PLUGIN target's does.
+  if (kind = ETargetKind.PLUGIN) or (kind = ETargetKind.EIOS) then
+    Exit;
+
+  Result := 'The target is a game client (' + ToStr(typ) + ') and no input plugin is paired, so the ' +
+            'input would be Simba''s own, which the client can flag to the server. Stopping before any input.';
+  {$IFDEF WL_TEST}
+  Result += ' A WL_TEST tool that sends no input defines WL_TEST_NO_INPUT.';
+  {$ENDIF}
+end;
+
+// The target's kind from Target.ToString(), as GetClient reads the handle: Target.Info on an image
+// target frees the target's image with its temporary record (Simba-AI lape/pitfalls.md row 119).
+function TClient.TargetKind(): ETargetKind; static;
+var
+  s: String;
+begin
+  s := Target.ToString();
+  if s.Contains(' - PLUGIN: ') then Exit(ETargetKind.PLUGIN);
+  if s.Contains(' - EIOS: ') then Exit(ETargetKind.EIOS);
+  if s.Contains(' - WINDOW: ') then Exit(ETargetKind.WINDOW);
+  if s.Contains(' - IMAGE: ') then Exit(ETargetKind.IMAGE);
+  Result := ETargetKind.NONE;
+end;
+
+procedure TClient.StopUnpairedInput(typ: EClient);
+var
+  err: String;
+begin
+  err := TClient.UnpairedInputError(typ, TClient.TargetKind());
+  if err <> '' then
+    raise GetDebugLn('Client', err);
+end;
+
+
 
 procedure TClient.Clear();
 begin
