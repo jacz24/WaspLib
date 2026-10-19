@@ -181,9 +181,17 @@ begin
 
   {$IFDEF WL_TEST}
   Client.Typ := EClient.RUNELITE;
+  // Simba-AI fork (FORK.md 17, Simba-AI #493): a test build pairs no input plugin, so it stops on a game
+  // client's window unless the tool sends no input. Only a window target: GetClient reads a window's
+  // handle headless.
+  {$IFNDEF WL_TEST_NO_INPUT}
+  if TClient.TargetKind() = ETargetKind.WINDOW then
+    Client.StopUnpairedInput(Client.GetClient());
+  {$ENDIF}
   {$ELSE}
   Client.Typ := Client.GetClient();
   Client.InjectInput();
+  Client.StopUnpairedInput(Client.Typ); // Simba-AI fork (FORK.md 17, Simba-AI #493)
   {$ENDIF}
 
   Mouse.Setup();
