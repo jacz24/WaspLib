@@ -134,10 +134,11 @@ var
 {$ENDIF}
 
 
-// Simba-AI fork (#493): no OS input to a game client. When the target is a game client and no input
-// plugin paired, the input would be Simba's own, and RuneLite's client on Windows flags injected clicks
-// to the server (Simba-AI simba-kb/projects/input-capture-paths.md, question 3). WaspLibSetup stops
-// there, before any input, in place of stock's fallback. An unknown client (no game window) goes on.
+// Simba-AI fork (FORK.md 17, Simba-AI #493): no OS input to a game client. When the target is a game
+// client and no input plugin paired, the input would be Simba's own, and RuneLite's client on Windows
+// flags injected clicks to the server (Simba-AI simba-kb/projects/input-capture-paths.md, question 3).
+// WaspLibSetup stops there, before any input, in place of stock's fallback. An unknown client (no game
+// window) goes on.
 function TClient.UnpairedInputError(typ: EClient; kind: ETargetKind): String; static;
 begin
   if typ = EClient.UNKNOWN then
