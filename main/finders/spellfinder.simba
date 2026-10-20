@@ -61,6 +61,12 @@ begin
   for i := 0 to 1 do
   begin
     name := LowerCase(ToStr(spell).After('.')) + SIZES[i];
+    // Simba-AI fork (FORK.md 21, Simba-AI #391): spells.zip holds the standard book's Ape Atoll icon as
+    // teleport_to_ape_atoll and the Arceuus book's as ape_atoll_teleport, not under their ESpell names.
+    case spell of
+      ESpell.APE_ATOLL_TELEPORT:         name := 'teleport_to_ape_atoll' + SIZES[i];
+      ESpell.APE_ATOLL_DUNGEON_TELEPORT: name := 'ape_atoll_teleport' + SIZES[i];
+    end;
     path := Self.CacheDir + name;
 
     if not FileExists(path) then
