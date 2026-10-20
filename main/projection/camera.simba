@@ -15,7 +15,8 @@ type
   TCamera = record
     X, Y, Z, Pitch, Yaw, Scale, MinScale, MaxScale,
     ZOffset, MinZ, MaxZ, ReverseZ: Integer;
-    Player, Center, Camera, Offset, ViewportOffset, Origin: TPoint;
+    Player, Center, Camera, Offset, Origin: TPoint;
+    ViewportOffset: TVector2; // Simba-AI fork (FORK.md, #443): floats, the GPU plugin's centre
     Sines, Cosines: array [0..2047] of Int32;
     ZoomScale, Radians: Single;
     Bounds: TBox;
@@ -76,8 +77,10 @@ begin
 
   Self.Scale := Self.MinScale;
 
-  Self.ViewportOffset.X := MainScreen.Bounds.Width div 2 + Self.Offset.X;
-  Self.ViewportOffset.Y := MainScreen.Bounds.Height div 2 + Self.Offset.Y;
+  // Simba-AI fork (FORK.md, #443): RuneLite's GPU plugin centres the view at w/2, h/2 in floats; div 2 put
+  // every point half a pixel left or up of the drawn one on an odd width or height.
+  Self.ViewportOffset.X := MainScreen.Bounds.Width / 2 + Self.Offset.X;
+  Self.ViewportOffset.Y := MainScreen.Bounds.Height / 2 + Self.Offset.Y;
 end;
 
 
