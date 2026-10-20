@@ -58,7 +58,18 @@ type
     DUELING_RING, GAMES_NECKLACE, DIGSITE_PENDANT, MYSTIC_CAPE
   );
 
+  TSpellTeleportSet = set of ESpellTeleport; // Simba-AI fork (FORK.md 25, Simba-AI #393)
+
 const
+  // Simba-AI fork (FORK.md 25, Simba-AI #393): the five slots that land in
+  // the Wilderness, Simba-AI's Wilderness box (TransportDestInWilderness).
+  // The game asks before each of them and waits for Yes (Simba-AI mechanics
+  // row 177).
+  WILDERNESS_TELEPORTS = TSpellTeleportSet([
+    ESpellTeleport.CEMETERY, ESpellTeleport.GHORROCK, ESpellTeleport.ANNAKARL,
+    ESpellTeleport.ICE_PLATEU, ESpellTeleport.CARRALLANGAR
+  ]);
+
   // Simba-AI fork (FORK.md, #41): each landing is the dest tile of the
   // spell's row in Skretzo's shortest-path (teleportation_spells.tsv and
   // teleportation_spells_home.tsv @ 8551e60), in Map.Position's frame:
@@ -118,6 +129,9 @@ type
 
   TTransporter = record
     HomeTeleportTimer: TCountDown;
+    // Simba-AI fork (FORK.md 25, Simba-AI #393): False refuses the
+    // WILDERNESS_TELEPORTS slots before the cast. WaspLibSetup sets True.
+    AllowWilderness: Boolean;
   end;
 
 function TTransporter.Teleport(spell: ESpellTeleport; pos: TWalkerPositionFunction = nil): Boolean;
@@ -127,6 +141,10 @@ var
   magicSpell: ESpell;
   hasTimer: Boolean;
 begin
+  // Simba-AI fork (FORK.md 25, Simba-AI #393): refused before any click, so no runes.
+  if (spell in WILDERNESS_TELEPORTS) and not Self.AllowWilderness then
+    Exit;
+
   if pos = nil then
     pos := @Map.Position;
 
@@ -134,7 +152,10 @@ begin
     ESpellTeleport.LUMBRIDGE_HOME, ESpellTeleport.EDGEVILLE_HOME,
     ESpellTeleport.LUNAR_HOME, ESpellTeleport.ARCEUUS_HOME:
     begin
-      t := 22*TICK;
+      // Simba-AI fork (FORK.md 24, Simba-AI #393): 33 ticks (19.8 s),
+      // Simba-AI Travel's bound. Stock's 22 (13.2 s) ran out before a
+      // landing 15.1 s after the call (Simba-AI mechanics row 176).
+      t := 33*TICK;
       hasTimer := True;
     end;
     else t := 6*TICK;
@@ -203,11 +224,24 @@ begin
   end;
 
   if Magic.Cast(magicSpell, option) then
+  begin
+    // Simba-AI fork (FORK.md 25, Simba-AI #393): click Yes on the game's
+    // question, whatever its title. The wait ends at the click, or at the
+    // landing when the game's setting turns the question off; the landing
+    // wait starts after it.
+    // shortcut: Select clicks any line that contains 'Yes', and with the
+    // question off a chat-history line can read as one (22 of 200 frames
+    // gave a line, Simba-AI core-reads.md); match the exact text if a run
+    // shows such a click.
+    if spell in WILDERNESS_TELEPORTS then
+      SleepUntil(Chat.Options[CHAT_OPTION_COLORS].Select('Yes', True, 0) or
+                 pos().InRange(TELEPORT_COORDINATES[spell], 30), 300, t);
     if SleepUntil(pos().InRange(TELEPORT_COORDINATES[spell], 30), 300, t) then
     begin
       Biometrics.Sleep(0, 4*TICK);
       Exit(True);
     end;
+  end;
 end;
 
 {$H-}

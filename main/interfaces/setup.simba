@@ -226,6 +226,7 @@ begin
   RSMouseZoom.ZoomLevel := -1;
   WorldSwitcher.Setup();
   FairyRing.Setup();
+  Transporter.AllowWilderness := True; // Simba-AI fork (FORK.md 25, Simba-AI #393)
 
   Antiban.WalkCameraAdjustments := True;
   Antiban.TimeRunning.Start();
