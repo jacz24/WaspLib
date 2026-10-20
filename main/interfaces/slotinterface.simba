@@ -295,7 +295,8 @@ begin
   if (@Self.PreConditionFunction <> nil) and not Self.PreConditionFunction() then
     Exit;
   Self.Hover(slot);
-  Target.MouseClick(button);
+  // Simba-AI fork (FORK.md 22, Simba-AI #470): Mouse.Click, not Target.MouseClick, so an override of it covers this click.
+  Mouse.Click(button);
 end;
 
 

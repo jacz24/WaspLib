@@ -361,7 +361,8 @@ end;
 function TItemInterface.Click(item: TItem; button: EMouseButton = EMouseButton.LEFT): Boolean;
 begin
   Result := Self.Hover(item);
-  if Result then Target.MouseClick(button);
+  // Simba-AI fork (FORK.md 22, Simba-AI #470): Mouse.Click, not Target.MouseClick, so an override of it covers this click.
+  if Result then Mouse.Click(button);
 end;
 
 
@@ -406,7 +407,8 @@ begin
   if (option <> '') and not MainScreen.IsUpText(option) then
     Exit(ChooseOption.Select(option));
 
-  Target.MouseClick(EMouseButton.LEFT);
+  // Simba-AI fork (FORK.md 22, Simba-AI #470): Mouse.Click, not Target.MouseClick, so an override of it covers this click.
+  Mouse.Click(EMouseButton.LEFT);
   Result := True;
 end;
 
@@ -425,6 +427,7 @@ begin
   if (option <> '') and not SleepUntil(MainScreen.IsUpText(option), 20, 200) then
     Exit(ChooseOption.Select(option));
 
-  Target.MouseClick(EMouseButton.LEFT);
+  // Simba-AI fork (FORK.md 22, Simba-AI #470): Mouse.Click, not Target.MouseClick, so an override of it covers this click.
+  Mouse.Click(EMouseButton.LEFT);
   Result := True;
 end;
