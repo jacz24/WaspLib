@@ -63,7 +63,8 @@ const
 
 
 
-  FILE_TIME_FORMAT: String = 'YYYY-MM-DD_hh-mm-ss-ms';
+  // Simba-AI fork (FORK.md 18, Simba-AI #491): zzz is the milliseconds; stock's ms was the month and the second.
+  FILE_TIME_FORMAT: String = 'YYYY-MM-DD_hh-mm-ss-zzz';
 
 
 procedure TCountDown.Restart(min, max: Integer); overload;
