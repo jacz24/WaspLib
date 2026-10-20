@@ -58,7 +58,7 @@ type
     DUELING_RING, GAMES_NECKLACE, DIGSITE_PENDANT, MYSTIC_CAPE
   );
 
-  TSpellTeleportSet = set of ESpellTeleport;
+  TSpellTeleportSet = set of ESpellTeleport; // Simba-AI fork (FORK.md 25, Simba-AI #393)
 
 const
   // Simba-AI fork (FORK.md 25, Simba-AI #393): the five slots that land in
@@ -141,7 +141,7 @@ var
   magicSpell: ESpell;
   hasTimer: Boolean;
 begin
-  // Simba-AI fork (FORK.md 25, Simba-AI #393): refused before any click.
+  // Simba-AI fork (FORK.md 25, Simba-AI #393): refused before any click, so no runes.
   if (spell in WILDERNESS_TELEPORTS) and not Self.AllowWilderness then
     Exit;
 
@@ -229,6 +229,10 @@ begin
     // question, whatever its title. The wait ends at the click, or at the
     // landing when the game's setting turns the question off; the landing
     // wait starts after it.
+    // shortcut: Select clicks any line that contains 'Yes', and with the
+    // question off a chat-history line can read as one (22 of 200 frames
+    // gave a line, Simba-AI core-reads.md); match the exact text if a run
+    // shows such a click.
     if spell in WILDERNESS_TELEPORTS then
       SleepUntil(Chat.Options[CHAT_OPTION_COLORS].Select('Yes', True, 0) or
                  pos().InRange(TELEPORT_COORDINATES[spell], 30), 300, t);
