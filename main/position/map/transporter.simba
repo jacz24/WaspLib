@@ -63,9 +63,10 @@ const
   // spell's row in Skretzo's shortest-path (teleportation_spells.tsv and
   // teleportation_spells_home.tsv @ 8551e60), in Map.Position's frame:
   // the tile's corner x*4, (12607-y)*4, plus RSTranslator.MapWidth of X
-  // per plane (only APE_ATOLL lands off plane 0). HOUSE_INSIDE,
-  // HOUSE_OUTSIDE and RESPAWN stay empty: they land where the account's
-  // house or respawn point is.
+  // per plane (APE_ATOLL and WATCHTOWER land off plane 0). WATCHTOWER and
+  // LUNAR_HOME hold the tile a cast landed on, not the source's (FORK.md
+  // 23, Simba-AI #392). HOUSE_INSIDE, HOUSE_OUTSIDE and RESPAWN stay
+  // empty: they land where the account's house or respawn point is.
   TELEPORT_COORDINATES: array [ESpellTeleport] of TPoint = [
     [], //HOUSE_INSIDE
     [], //HOUSE_OUTSIDE
@@ -94,10 +95,10 @@ const
     [36788, 39236], //APE_ATOLL
     [11560, 35712], //TROLLHEIM
     [11916, 36388], //MIND_ALTAR
-    [10184, 37980], //WATCHTOWER
+    [61388, 37984], //WATCHTOWER
     [10336, 38040], //YANILLE
     [11900, 34676], //ICE_PLATEU
-    [8452, 34768], //LUNAR_HOME
+    [8372, 34776], //LUNAR_HOME
     [14192, 36312], //FENKENSTRAINS_CASTLE
     [13732, 36592], //SALVE_GRAVEYARD
     [6528, 35080], //ARCEUUS_LIBRARY
