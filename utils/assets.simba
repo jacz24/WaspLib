@@ -67,12 +67,13 @@ var
 begin
   text := FileRead(path);
   if text = '' then
-    Exit(nil); // Parse('') does not raise, and its item fails on the first read
+    Exit(nil); // missing, empty or under a writer's lock; Parse('') does not raise, and its item fails on the first read
 
   parser := new TJSONParser();
   try
     parser.Parse(text);
   except
+    DebugLn('WLAssets', GetExceptionMessage(), ELogLevel.WARN);
     Exit(nil);
   end;
 
@@ -81,24 +82,27 @@ end;
 
 // Simba-AI fork (FORK.md 20, Simba-AI #489): stock deleted and saved the file on every start with a fetch,
 // a window in which a sibling's read found no file; now only when the hashes differ.
-procedure TWLAssets.SaveHashes(json: TJSONObject; path: String); static;
+procedure TWLAssets.SaveHashes(fetched: TJSONObject; path: String); static;
 var
   disk: TJSONObject;
 begin
   disk := TWLAssets.ReadHashes(path);
-  if (disk <> nil) and (disk.Format() = json.Format()) then
+  if (disk <> nil) and (disk.Format() = fetched.Format()) then
     Exit;
 
   FileDelete(path);
-  TJSONParser(json).Save(path);
+  TJSONParser(fetched).Save(path);
 end;
 
 function TWLAssets.LoadJSON(): TJSONObject;
+var
+  path: String;
 begin
   DebugLn('WLAssets', 'Couldn''t get assets information. WaspLib will attempt to run with whatever it has available.', ELogLevel.WARN);
-  Result := TWLAssets.ReadHashes(WLEnv.AssetsDir + 'hashes.json');
+  path := WLEnv.AssetsDir + 'hashes.json';
+  Result := TWLAssets.ReadHashes(path);
   if Result = nil then
-    DebugLn('WLAssets', 'Unable to read ' + WLEnv.AssetsDir + 'hashes.json', ELogLevel.WARN);
+    DebugLn('WLAssets', 'Unable to read ' + path + ': missing, empty, locked by a writer or not JSON', ELogLevel.WARN);
 end;
 
 
