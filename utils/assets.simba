@@ -58,21 +58,51 @@ begin
   Result := parser;
 end;
 
-function TWLAssets.LoadJSON(): TJSONObject;
+// Simba-AI fork (FORK.md 20, Simba-AI #489): FileRead takes a shared lock; TJSONParser.Load took an exclusive
+// one, which a sibling start reading at the same instant refused. nil for a missing, empty or broken file.
+function TWLAssets.ReadHashes(path: String): TJSONObject; static;
 var
+  text: String;
   parser: TJSONParser;
 begin
-  DebugLn('WLAssets', 'Couldn''t get assets information. WaspLib will attempt to run with whatever it has available.', ELogLevel.WARN);
-  parser := new TJSONParser();
+  text := FileRead(path);
+  if text = '' then
+    Exit(nil); // missing, empty or under a writer's lock; Parse('') does not raise, and its item fails on the first read
 
+  parser := new TJSONParser();
   try
-    parser.Load(WLEnv.AssetsDir + 'hashes.json');
+    parser.Parse(text);
   except
     DebugLn('WLAssets', GetExceptionMessage(), ELogLevel.WARN);
-    Exit;
+    Exit(nil);
   end;
 
   Result := parser;
+end;
+
+// Simba-AI fork (FORK.md 20, Simba-AI #489): stock deleted and saved the file on every start with a fetch,
+// a window in which a sibling's read found no file; now only when the hashes differ.
+procedure TWLAssets.SaveHashes(fetched: TJSONObject; path: String); static;
+var
+  disk: TJSONObject;
+begin
+  disk := TWLAssets.ReadHashes(path);
+  if (disk <> nil) and (disk.Format() = fetched.Format()) then
+    Exit;
+
+  FileDelete(path);
+  TJSONParser(fetched).Save(path);
+end;
+
+function TWLAssets.LoadJSON(): TJSONObject;
+var
+  path: String;
+begin
+  DebugLn('WLAssets', 'Couldn''t get assets information. WaspLib will attempt to run with whatever it has available.', ELogLevel.WARN);
+  path := WLEnv.AssetsDir + 'hashes.json';
+  Result := TWLAssets.ReadHashes(path);
+  if Result = nil then
+    DebugLn('WLAssets', 'Unable to read ' + path + ': missing, empty, locked by a writer or not JSON', ELogLevel.WARN);
 end;
 
 
@@ -112,8 +142,7 @@ begin
     Exit;
   end;
 
-  FileDelete(WLEnv.AssetsDir + 'hashes.json');
-  TJSONParser(Self.JSON).Save(WLEnv.AssetsDir + 'hashes.json');
+  TWLAssets.SaveHashes(Self.JSON, WLEnv.AssetsDir + 'hashes.json');
 
   Self.Lock := TLock.Create();
 

@@ -23,7 +23,8 @@ begin
   //Delete old cache files if they exist
   for path in DirList(Self.CacheDir) do
   begin
-    tmp := Copy(path, Length(path) - Length(Self.Version), Length(path));
+    // Simba-AI fork (FORK.md 19, Simba-AI #489): + 1, the last Length(Version) characters, as the 8 sibling setups.
+    tmp := Copy(path, Length(path) - Length(Self.Version) + 1, Length(path));
     if tmp = Self.Version then Continue;
     DirDelete(path, False);
   end;
